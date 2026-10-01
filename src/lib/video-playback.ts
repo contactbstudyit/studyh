@@ -75,6 +75,11 @@ export function getSourceHost(url: string) {
   try { return new URL(url).host; } catch { return "Invalid URL"; }
 }
 
+export function createMediaProxyUrl(sourceUrl: string, mediaUrl = sourceUrl) {
+  const params = new URLSearchParams({ source: sourceUrl, url: mediaUrl });
+  return `/api/media-proxy?${params.toString()}`;
+}
+
 export function getPlaybackFailureReason(input: {
   sourceType: VideoSourceType;
   httpStatus: number | null;

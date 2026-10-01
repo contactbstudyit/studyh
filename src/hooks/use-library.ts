@@ -129,8 +129,8 @@ export function useLibraryStats() {
   return { stats, refresh };
 }
 
-export function useVideos(options: { categoryId?: string; search?: string; searchCategoryIds?: string[]; admin?: boolean; published?: boolean } = {}) {
-  const { admin = false, categoryId, search, published } = options;
+export function useVideos(options: { categoryId?: string; search?: string; searchCategoryIds?: string[]; admin?: boolean; published?: boolean; enabled?: boolean } = {}) {
+  const { admin = false, categoryId, search, published, enabled = true } = options;
   const searchCategoryIds = options.searchCategoryIds?.join(",") ?? "";
   const [videos, setVideos] = useState<VideoRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -158,7 +158,7 @@ export function useVideos(options: { categoryId?: string; search?: string; searc
     } catch { toast.error("Could not load videos."); }
     finally { setLoading(false); }
   }, [admin, categoryId, search, searchCategoryIds, published]);
-  useEffect(() => { void fetchPage(0); }, [fetchPage]);
+  useEffect(() => { if (enabled) void fetchPage(0); }, [enabled, fetchPage]);
   const refresh = useCallback(() => fetchPage(0), [fetchPage]);
   async function create(input: Omit<VideoRecord, "id" | "created_at" | "updated_at" | "views" | "categories">): Promise<VideoRecord | null> {
     try { const { data, error } = await createClient().from("videos").insert(input).select("*, categories(name)").single(); if (error) throw error; const video = data as VideoRecord; setVideos((old) => [video, ...old]); toast.success("Video added."); return video; }

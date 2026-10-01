@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Clock3, Command, Film, Menu, Play, Search, Settings2, ShieldCheck, X } from "lucide-react";
 import Link from "next/link";
 import { Category, useCategories, useVideos, VideoRecord } from "@/hooks/use-library";
+import { detectSourceType, getPlaybackFailureReason, getSourceHost, probeVideoSource, SourceProbe, VideoSourceType } from "@/lib/video-playback";
 
 export default function Home() {
   const [activeCategory, setActiveCategory] = useState("");
@@ -39,28 +40,150 @@ export default function Home() {
 function CategoryPill({ category, selected, onClick }: { category: Category; selected: boolean; onClick: () => void }) { return <button className={`category-chip ${selected ? "selected" : ""}`} onClick={onClick}>{category.name}</button>; }
 
 function VideoPlayer({ video }: { video: VideoRecord }) {
-  const [error, setError] = useState(false);
+  const [failure, setFailure] = useState("");
   const [loading, setLoading] = useState(true);
+  const [attempt, setAttempt] = useState(0);
+  const [sourceType, setSourceType] = useState<VideoSourceType>("unknown");
+  const [diagnostics, setDiagnostics] = useState<SourceProbe & { sourceType: VideoSourceType; hlsType: string | null; hlsDetails: string | null; hlsStatus: number | null; mediaErrorCode: number | null }>({
+    status: null, contentType: null, finalHost: null, error: null,
+    sourceType: "unknown", hlsType: null, hlsDetails: null, hlsStatus: null, mediaErrorCode: null,
+  });
   const videoRef = useRef<HTMLVideoElement>(null);
   useEffect(() => {
     const element = videoRef.current;
     if (!element) return;
     let active = true;
-    const fail = () => { if (active) { setLoading(false); setError(true); } };
-    const path = video.video_url.split("?")[0].toLowerCase();
     let hls: import("hls.js").default | undefined;
-    let dash: { initialize: (media: HTMLVideoElement, source: string, autoplay: boolean) => void; on: (event: string, callback: () => void) => void; reset: () => void } | undefined;
+    let dash: { initialize: (media: HTMLVideoElement, source: string, autoplay: boolean) => void; on: (event: string, callback: (event?: unknown) => void) => void; reset: () => void } | undefined;
+    let probe: SourceProbe | null = null;
+    let resolvedType = detectSourceType(video.video_url);
+    const host = getSourceHost(video.video_url);
+    const initialType = resolvedType;
+    setFailure(""); setLoading(true); setSourceType(initialType);
+    setDiagnostics({ status: null, contentType: null, finalHost: null, error: null, sourceType: initialType, hlsType: null, hlsDetails: null, hlsStatus: null, mediaErrorCode: null });
+    if (process.env.NODE_ENV === "development") console.info("[video-playback] source selected", { sourceHost: host, sourceType: initialType, hasThumbnail: Boolean(video.thumbnail_url), attempt });
+
+    const recordProbe = (result: SourceProbe) => {
+      probe = result;
+      if (!active) return;
+      const detectedType = detectSourceType(video.video_url, result.contentType);
+      setSourceType((current) => current === "unknown" ? detectedType : current);
+      setDiagnostics((current) => ({ ...current, ...result, sourceType: current.sourceType === "unknown" ? detectedType : current.sourceType }));
+      if (process.env.NODE_ENV === "development") console.info("[video-playback] source metadata", { sourceHost: host, sourceType: detectedType, status: result.status, contentType: result.contentType, finalHost: result.finalHost, error: result.error });
+    };
+    const probePromise = probeVideoSource(video.video_url);
+    void probePromise.then(recordProbe);
+
+    const fail = (detail?: { hlsType?: string; hlsDetails?: string; hlsStatus?: number | null }) => {
+      if (!active) return;
+      const type = detail?.hlsType ?? null;
+      const details = detail?.hlsDetails ?? null;
+      const status = detail?.hlsStatus ?? null;
+      setLoading(false);
+      setDiagnostics((current) => ({ ...current, hlsType: type, hlsDetails: details, hlsStatus: status }));
+      const reason = getPlaybackFailureReason({
+        sourceType: detectSourceType(video.video_url, probe?.contentType),
+        httpStatus: probe?.status ?? null,
+        probeError: probe?.error ?? null,
+        hlsType: type,
+        hlsDetails: details,
+        hlsStatus: status,
+      });
+      setFailure(reason);
+      if (process.env.NODE_ENV === "development") console.error("[video-playback] failed", { sourceHost: host, sourceType: detectSourceType(video.video_url, probe?.contentType), httpStatus: status ?? probe?.status ?? null, contentType: probe?.contentType ?? null, hlsType: type, hlsDetails: details, hlsStatus: status, reason });
+    };
+
+    element.pause();
+    element.removeAttribute("src");
+    element.load();
     void (async () => {
       try {
-        if (path.endsWith(".m3u8")) {
-          if (element.canPlayType("application/vnd.apple.mpegurl")) element.src = video.video_url;
-          else { const HlsPlayer = (await import("hls.js")).default; if (!active) return; if (!HlsPlayer.isSupported()) { fail(); return; } hls = new HlsPlayer({ enableWorker: true }); hls.loadSource(video.video_url); hls.attachMedia(element); hls.on(HlsPlayer.Events.ERROR, (_event, data) => { if (data.fatal) fail(); }); }
-        } else if (path.endsWith(".mpd")) {
-          const dashModule = await import("dashjs"); if (!active) return; const factory = dashModule.MediaPlayer() as unknown as { create: () => typeof dash }; dash = factory.create(); dash?.initialize(element, video.video_url, true); dash?.on("error", fail);
-        } else element.src = video.video_url;
-      } catch { fail(); }
+        let type = initialType;
+        if (type === "unknown") {
+          const metadata = await probePromise;
+          type = detectSourceType(video.video_url, metadata.contentType);
+        }
+        if (!active) return;
+        resolvedType = type;
+        setSourceType(type);
+        setDiagnostics((current) => ({ ...current, sourceType: type }));
+        if (type === "hls") {
+          if (element.canPlayType("application/vnd.apple.mpegurl")) {
+            element.src = video.video_url;
+            element.load();
+          } else {
+            const HlsPlayer = (await import("hls.js")).default;
+            if (!active) return;
+            if (!HlsPlayer.isSupported()) { fail({ hlsType: "unsupported", hlsDetails: "HLS is not supported by this browser" }); return; }
+            hls = new HlsPlayer({ enableWorker: true });
+            hls.on(HlsPlayer.Events.MEDIA_ATTACHED, () => {
+              if (process.env.NODE_ENV === "development") console.info("[video-playback] HLS media attached", { sourceHost: host });
+              hls?.loadSource(video.video_url);
+            });
+            hls.on(HlsPlayer.Events.MANIFEST_PARSED, () => {
+              if (!active) return;
+              setLoading(false);
+              if (process.env.NODE_ENV === "development") console.info("[video-playback] HLS manifest parsed", { sourceHost: host });
+              void element.play().catch((error: unknown) => {
+                if (process.env.NODE_ENV === "development") console.info("[video-playback] autoplay not allowed; native controls remain available", error instanceof Error ? error.message : error);
+              });
+            });
+            hls.on(HlsPlayer.Events.ERROR, (_event, data) => {
+              const status = data.response?.code ?? null;
+              const detail = { hlsType: String(data.type), hlsDetails: String(data.details), hlsStatus: status };
+              if (process.env.NODE_ENV === "development") console[data.fatal ? "error" : "warn"]("[video-playback] HLS error", { sourceHost: host, fatal: data.fatal, ...detail });
+              if (data.fatal) fail(detail);
+            });
+            hls.attachMedia(element);
+          }
+        } else if (type === "dash") {
+          const dashModule = await import("dashjs");
+          if (!active) return;
+          const factory = dashModule.MediaPlayer() as unknown as { create: () => typeof dash };
+          dash = factory.create();
+          if (!dash) { fail({ hlsType: "DASH", hlsDetails: "DASH player could not be initialized" }); return; }
+          dash.initialize(element, video.video_url, true);
+          dash.on(dashModule.MediaPlayer.events.ERROR, (event) => {
+            const info = event && typeof event === "object" ? event as { error?: { message?: string }; code?: number; message?: string } : {};
+            const details = info.error?.message ?? info.message ?? "DASH playback error";
+            const detail = { hlsType: "DASH", hlsDetails: details, hlsStatus: info.code ?? undefined };
+            if (process.env.NODE_ENV === "development") console.error("[video-playback] DASH error", { sourceHost: host, ...detail });
+            fail(detail);
+          });
+        } else {
+          element.src = video.video_url;
+          element.load();
+        }
+      } catch (error) {
+        const details = error instanceof Error ? error.message : "Player initialization failed";
+        if (process.env.NODE_ENV === "development") console.error("[video-playback] player initialization failed", { sourceHost: host, sourceType: resolvedType, error: details });
+        fail({ hlsType: "player initialization", hlsDetails: details });
+      }
     })();
-    return () => { active = false; hls?.destroy(); dash?.reset(); };
-  }, [video.video_url]);
-  return <div className="player-frame"><video ref={videoRef} controls autoPlay playsInline preload="metadata" poster={video.thumbnail_url ?? undefined} onPlaying={() => setLoading(false)} onWaiting={() => setLoading(true)} onError={() => { setLoading(false); setError(true); }}/>{loading && !error && <div className="player-loading"><span className="spinner"/><span>Loading video...</span></div>}{error && <div className="player-error"><Film size={24}/><strong>Unable to play this video</strong><span>The video source may not allow browser playback or may be unavailable.</span></div>}<span className="player-hint"><Command size={12}/> SPACE TO PLAY</span></div>;
+    return () => { active = false; hls?.destroy(); dash?.reset(); element.pause(); element.removeAttribute("src"); element.load(); };
+  }, [video.video_url, attempt]);
+
+  function handleMediaError(event: React.SyntheticEvent<HTMLVideoElement>) {
+    if (failure) return;
+    const mediaErrorCode = event.currentTarget.error?.code ?? null;
+    const reason = getPlaybackFailureReason({ sourceType, httpStatus: diagnostics.status, probeError: diagnostics.error, mediaErrorCode, hlsType: diagnostics.hlsType, hlsDetails: diagnostics.hlsDetails, hlsStatus: diagnostics.hlsStatus });
+    setDiagnostics((current) => ({ ...current, mediaErrorCode }));
+    setLoading(false); setFailure(reason);
+    if (process.env.NODE_ENV === "development") console.error("[video-playback] HTMLMediaElement error", { sourceHost: getSourceHost(video.video_url), sourceType, httpStatus: diagnostics.status, contentType: diagnostics.contentType, corsProbeError: diagnostics.error, mediaErrorCode, mediaErrorMessage: event.currentTarget.error?.message, reason });
+  }
+
+  const sourceHost = getSourceHost(video.video_url);
+  const diagnosticLines = [
+    `Source: ${sourceHost}`,
+    `Type: ${sourceType.toUpperCase()}`,
+    diagnostics.hlsStatus !== null ? `Media HTTP status: ${diagnostics.hlsStatus}` : diagnostics.status !== null ? `Metadata HTTP status: ${diagnostics.status}` : null,
+    diagnostics.contentType ? `Content-Type: ${diagnostics.contentType}` : null,
+    diagnostics.hlsDetails ? `Player detail: ${diagnostics.hlsDetails}` : null,
+  ].filter(Boolean);
+  return <div className="player-frame" data-source-type={sourceType}>
+    <video ref={videoRef} controls autoPlay playsInline preload="metadata" poster={video.thumbnail_url || undefined} onLoadedMetadata={() => setLoading(false)} onCanPlay={() => setLoading(false)} onPlaying={() => setLoading(false)} onWaiting={() => setLoading(true)} onError={handleMediaError}/>
+    {loading && !failure && <div className="player-loading"><span className="spinner"/><span>Loading video...</span></div>}
+    {failure && <div className="player-error"><Film size={24}/><strong>Unable to play this video</strong><span className="player-reason">{failure}</span><span className="player-diagnostics">{diagnosticLines.join(" · ")}</span><button type="button" onClick={() => { setFailure(""); setAttempt((current) => current + 1); }}>Try again</button></div>}
+    <span className="player-hint"><Command size={12}/> SPACE TO PLAY</span>
+  </div>;
 }

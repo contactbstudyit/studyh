@@ -285,7 +285,7 @@ async function relay(request: NextRequest) {
   try {
     if (rootRequest) {
       const supabase = await createClient();
-      const { data: video, error } = await supabase.from("videos").select("id").eq("video_url", source).maybeSingle();
+      const { data: video, error } = await supabase.from("videos").select("id").eq("video_url", source).limit(1).maybeSingle();
       if (error) return errorResponse(request, "Could not verify the published media source", 502);
       if (!video) return errorResponse(request, "Media source is not available in the public library", 404);
     }

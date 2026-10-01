@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Film, FolderOpen, LayoutDashboard, LogOut, Plus, Search, Settings, ShieldCheck, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
@@ -18,8 +18,8 @@ export default function AdminDashboard() {
   const [quickCategory, setQuickCategory] = useState(false);
   const [categoryFormError, setCategoryFormError] = useState("");
   const [selectedCategoryId, setSelectedCategoryId] = useState("");
-  const [thumbnailGeneration, setThumbnailGeneration] = useState<"idle" | "generating" | "generated" | "failed">("idle");
-  const [thumbnailGenerationError, setThumbnailGenerationError] = useState("");
+  const [videoSubmitInProgress, setVideoSubmitInProgress] = useState(false);
+  const videoSubmitLock = useRef(false);
   const [generatingThumbnailIds, setGeneratingThumbnailIds] = useState<Set<string>>(() => new Set());
   const [thumbnailBatchRunning, setThumbnailBatchRunning] = useState(false);
   const [thumbnailBatchProgress, setThumbnailBatchProgress] = useState("");
@@ -55,8 +55,6 @@ export default function AdminDashboard() {
   function openVideo(video?: VideoRecord) {
     setEditingVideo(video ?? null);
     setSelectedCategoryId(video?.category_id ?? "");
-    setThumbnailGeneration("idle");
-    setThumbnailGenerationError("");
     setSection("Add Video");
     categoriesHook.setErrorMessage("");
     void categoryOptionsHook.refresh();
@@ -76,35 +74,27 @@ export default function AdminDashboard() {
     const categoryId = String(form.get("category_id") ?? "");
     if (!categoryId) { toast.error("Choose a category before saving the video."); return; }
     const data = { title, video_url: url, description: String(form.get("description") ?? "").trim(), thumbnail_url: thumbnail || null, category_id: categoryId, tags, duration: String(form.get("duration") ?? "").trim(), featured: form.get("featured") === "on", published: form.get("published") === "on" };
-    let savedVideoId: string | null = null;
-    if (editingVideo) {
-      const ok = await videosHook.update(editingVideo.id, data);
-      if (ok) savedVideoId = editingVideo.id;
-    } else {
-      const created = await videosHook.create(data);
-      if (created) savedVideoId = created.id;
-    }
-    if (!savedVideoId) return;
+    if (videoSubmitLock.current) return;
+    videoSubmitLock.current = true; setVideoSubmitInProgress(true);
+    const formElement = event.currentTarget;
+    let savedVideo: VideoRecord | null = null;
+    try {
+      if (editingVideo) {
+        const updated = await videosHook.update(editingVideo.id, data);
+        if (updated) savedVideo = { ...editingVideo, ...data, updated_at: new Date().toISOString() };
+      } else savedVideo = await videosHook.create(data);
+    } finally { videoSubmitLock.current = false; setVideoSubmitInProgress(false); }
 
-    if (!thumbnail) {
-      setThumbnailGeneration("generating");
-      setThumbnailGenerationError("");
-      try {
-        const image = await generateVideoThumbnail(url, data.duration);
-        const response = await fetch(`/api/admin/videos/${encodeURIComponent(savedVideoId)}/thumbnail`, { method: "POST", headers: { "Content-Type": image.type }, body: image });
-        const result = await response.json() as { error?: string };
-        if (!response.ok) throw new Error(result.error || "Thumbnail storage request failed");
-        setThumbnailGeneration("generated");
-        toast.success("Thumbnail generated");
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : "Unknown thumbnail error";
-        setThumbnailGeneration("failed");
-        setThumbnailGenerationError(reason);
-        toast.error("Thumbnail could not be generated. You can add a thumbnail URL manually.");
-        if (process.env.NODE_ENV === "development") console.error("[video-thumbnail] generation failed; video remains saved", { videoId: savedVideoId, sourceHost: new URL(url).host, reason });
-      }
-    }
-    setEditingVideo(null); setSection("Videos"); await videosHook.refresh(); await categoriesHook.refresh(); await statsHook.refresh();
+    if (!savedVideo) return;
+    formElement.reset();
+    setSelectedCategoryId("");
+    setEditingVideo(null);
+    setSection("Videos");
+    if (!editingVideo) toast.success("Video added successfully");
+    void videosHook.refresh();
+    void categoriesHook.refresh();
+    void statsHook.refresh();
+    if (!thumbnail) void generateThumbnailFor(savedVideo);
   }
   async function submitCategory(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); const form = new FormData(event.currentTarget);
@@ -190,7 +180,7 @@ export default function AdminDashboard() {
     <section className="dashboard-content"><header className="dashboard-top"><span>LIBRARY MANAGEMENT</span><button onClick={logout}><LogOut size={14}/> Sign out</button></header>
       {section === "Dashboard" && <><div className="admin-heading"><div><span className="eyebrow">OVERVIEW</span><h1>Dashboard</h1><p>Your library at a glance.</p></div><button className="button-primary" onClick={() => openVideo()}><Plus size={15}/> Add video</button></div><div className="stats-row"><Stat label="Total videos" value={stats?.total_videos}/><Stat label="Published" value={stats?.published_videos}/><Stat label="Categories" value={stats?.total_categories}/><Stat label="Total views" value={stats?.total_views}/></div><div className="table-heading"><h2>Recently added</h2><button onClick={() => setSection("Videos")}>Manage videos <ArrowLeft size={13}/></button></div><VideoTable videos={videosHook.videos.slice(0, 6)} categories={categoriesHook.categories} onEdit={openVideo} onDelete={removeVideo} onToggle={toggleVideo} onGenerateThumbnail={generateThumbnailFor} generatingThumbnailIds={generatingThumbnailIds}/></>}
       {section === "Videos" && <><div className="admin-heading"><div><span className="eyebrow">LIBRARY</span><h1>Videos</h1><p>Search, update, and publish your collection.</p></div><div className="video-header-actions"><button className="secondary-action" onClick={generateMissingThumbnails} disabled={thumbnailBatchRunning}>{thumbnailBatchRunning ? "Generating thumbnails..." : "Generate Missing Thumbnails"}</button><button className="button-primary" onClick={() => openVideo()}><Plus size={15}/> Add video</button></div></div>{thumbnailBatchProgress && <p className="thumbnail-status" role="status">{thumbnailBatchProgress}</p>}<div className="table-tools"><label><Search size={15}/><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search videos"/></label><select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}><option value="">All categories</option>{categoriesHook.categories.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}</select><select value={publishedFilter} onChange={(event) => setPublishedFilter(event.target.value)}><option value="all">All statuses</option><option value="published">Published</option><option value="draft">Unpublished</option></select></div><VideoTable videos={videosHook.videos} categories={categoriesHook.categories} onEdit={openVideo} onDelete={removeVideo} onToggle={toggleVideo} onGenerateThumbnail={generateThumbnailFor} generatingThumbnailIds={generatingThumbnailIds}/>{videosHook.hasMore && <button className="load-admin" onClick={videosHook.loadMore}>Load more</button>}</>}
-      {section === "Add Video" && <><div className="admin-heading add-video-heading"><div><span className="eyebrow">LIBRARY</span><h1>{editingVideo ? "Edit video" : "Add video"}</h1><p>Videos stream directly from their external URLs.</p></div></div><div className="video-editor-card"><form key={editingVideo?.id ?? "new-video"} onSubmit={submitVideo}><label>VIDEO URL<input name="video_url" type="url" required placeholder="https://cdn.example.com/video.mp4" defaultValue={editingVideo?.video_url}/><small>External HTTPS URL only. No video upload.</small></label><label>TITLE<input name="title" required maxLength={180} defaultValue={editingVideo?.title}/></label><div className="category-field"><label htmlFor="video-category">CATEGORY</label><div className="category-control-row"><select id="video-category" name="category_id" required value={selectedCategoryId} onChange={(event) => setSelectedCategoryId(event.target.value)} disabled={categoryOptionsHook.loading || (Boolean(categoryOptionsHook.error) && categoryOptionsHook.categories.length === 0)}><option value="" disabled>{categoryOptionsHook.loading ? "Loading categories..." : categoryOptionsHook.error ? "Categories unavailable" : categoryOptionsHook.categories.length ? "Select category" : "No categories yet — Create category"}</option>{categoryOptionsHook.categories.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}</select><button className="create-category-inline" type="button" onClick={() => openCategory(undefined, true)}><Plus size={14}/> Create category</button></div>{categoryOptionsHook.error && <p className="field-error" role="alert">Could not load categories: {categoryOptionsHook.error} <button type="button" onClick={() => void categoryOptionsHook.refresh()}>Retry</button></p>}{!categoryOptionsHook.error && !categoryOptionsHook.loading && categoryOptionsHook.categories.length === 0 && <p className="field-empty">No categories yet — Create category</p>}</div><label>DESCRIPTION<textarea name="description" rows={3} defaultValue={editingVideo?.description}/></label><label>THUMBNAIL URL<input name="thumbnail_url" type="url" placeholder="https://..." defaultValue={editingVideo?.thumbnail_url ?? ""}/><small>Optional — leave empty to automatically generate a thumbnail from the video.</small></label>{thumbnailGeneration === "generating" && <p className="thumbnail-status" role="status">Generating thumbnail…</p>}{thumbnailGeneration === "generated" && <p className="thumbnail-status success" role="status">Thumbnail generated</p>}{thumbnailGeneration === "failed" && <p className="thumbnail-status warning" role="status">Thumbnail could not be generated. You can add a thumbnail URL manually.{thumbnailGenerationError && <span className="thumbnail-error-detail"> {thumbnailGenerationError}</span>}</p>}<label>TAGS<input name="tags" placeholder="documentary, travel" defaultValue={editingVideo?.tags.join(", ")}/></label><label>DURATION<input name="duration" placeholder="12:34" defaultValue={editingVideo?.duration}/></label><div className="check-row"><label><input type="checkbox" name="featured" defaultChecked={editingVideo?.featured}/> Featured</label><label><input type="checkbox" name="published" defaultChecked={editingVideo?.published ?? true}/> Published</label></div><div className="video-form-actions"><button className="button-primary submit-button" type="submit" disabled={categoryOptionsHook.loading || (Boolean(categoryOptionsHook.error) && categoryOptionsHook.categories.length === 0) || categoriesHook.loading || thumbnailGeneration === "generating"}>{editingVideo ? "Save changes" : "Add video"}</button><button className="cancel-video-button" type="button" onClick={() => { setEditingVideo(null); setSection("Videos"); }}>Cancel</button></div></form></div></>}
+      {section === "Add Video" && <><div className="admin-heading add-video-heading"><div><span className="eyebrow">LIBRARY</span><h1>{editingVideo ? "Edit video" : "Add video"}</h1><p>Videos stream directly from their external URLs.</p></div></div><div className="video-editor-card"><form key={editingVideo?.id ?? "new-video"} onSubmit={submitVideo}><label>VIDEO URL<input name="video_url" type="url" required placeholder="https://cdn.example.com/video.mp4" defaultValue={editingVideo?.video_url}/><small>External HTTPS URL only. No video upload.</small></label><label>TITLE<input name="title" required maxLength={180} defaultValue={editingVideo?.title}/></label><div className="category-field"><label htmlFor="video-category">CATEGORY</label><div className="category-control-row"><select id="video-category" name="category_id" required value={selectedCategoryId} onChange={(event) => setSelectedCategoryId(event.target.value)} disabled={categoryOptionsHook.loading || (Boolean(categoryOptionsHook.error) && categoryOptionsHook.categories.length === 0)}><option value="" disabled>{categoryOptionsHook.loading ? "Loading categories..." : categoryOptionsHook.error ? "Categories unavailable" : categoryOptionsHook.categories.length ? "Select category" : "No categories yet — Create category"}</option>{categoryOptionsHook.categories.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}</select><button className="create-category-inline" type="button" onClick={() => openCategory(undefined, true)}><Plus size={14}/> Create category</button></div>{categoryOptionsHook.error && <p className="field-error" role="alert">Could not load categories: {categoryOptionsHook.error} <button type="button" onClick={() => void categoryOptionsHook.refresh()}>Retry</button></p>}{!categoryOptionsHook.error && !categoryOptionsHook.loading && categoryOptionsHook.categories.length === 0 && <p className="field-empty">No categories yet — Create category</p>}</div><label>DESCRIPTION<textarea name="description" rows={3} defaultValue={editingVideo?.description}/></label><label>THUMBNAIL URL<input name="thumbnail_url" type="url" placeholder="https://..." defaultValue={editingVideo?.thumbnail_url ?? ""}/><small>Optional — leave empty to automatically generate a thumbnail from the video.</small></label><label>TAGS<input name="tags" placeholder="documentary, travel" defaultValue={editingVideo?.tags.join(", ")}/></label><label>DURATION<input name="duration" placeholder="12:34" defaultValue={editingVideo?.duration}/></label><div className="check-row"><label><input type="checkbox" name="featured" defaultChecked={editingVideo?.featured}/> Featured</label><label><input type="checkbox" name="published" defaultChecked={editingVideo?.published ?? true}/> Published</label></div><div className="video-form-actions"><button className="button-primary submit-button" type="submit" disabled={videoSubmitInProgress}>{videoSubmitInProgress ? "Saving..." : editingVideo ? "Save changes" : "Add video"}</button><button className="cancel-video-button" type="button" onClick={() => { setEditingVideo(null); setSection("Videos"); }}>Cancel</button></div></form></div></>}
       {section === "Categories" && <><div className="admin-heading"><div><span className="eyebrow">ORGANIZE</span><h1>Categories</h1><p>Create and manage library categories.</p></div><button className="button-primary" onClick={() => openCategory()}><Plus size={15}/> Add category</button></div><div className="category-admin-list">{categoriesHook.categories.map((category) => <div className="category-admin-row" key={category.id}><div><strong>{category.name}</strong><span>{category.description || "No description"}</span></div><span>{category.video_count ?? 0} videos</span><button onClick={() => openCategory(category)}>Edit</button><button aria-label={`Delete ${category.name}`} onClick={() => deleteCategory(category)}><Trash2 size={15}/></button></div>)}{categoriesHook.categories.length === 0 && <p className="admin-empty">No categories yet. Create one to organize videos.</p>}</div></>}
       {section === "Settings" && <><div className="admin-heading"><div><span className="eyebrow">ACCOUNT</span><h1>Settings</h1><p>Manage your admin session.</p></div></div><div className="settings-panel"><ShieldCheck size={18}/><div><strong>Protected with Supabase Auth</strong><span>Admin actions are enforced by database row-level security policies.</span></div><button onClick={logout}>Sign out</button></div><p className="admin-note">Video files are never uploaded. Playback streams directly from each external URL.</p></>}
     </section>

@@ -207,7 +207,7 @@ export function useVideos(options: { categoryId?: string; search?: string; searc
   useEffect(() => { if (enabled) void fetchPage(pageNumber === undefined ? 0 : Math.max(1, pageNumber) - 1); }, [enabled, fetchPage, pageNumber]);
   const refresh = useCallback(() => fetchPage(pageNumber === undefined ? 0 : Math.max(1, pageNumber) - 1), [fetchPage, pageNumber]);
   async function create(input: Omit<VideoRecord, "id" | "created_at" | "updated_at" | "views" | "categories">): Promise<VideoRecord | null> {
-    try { const { data, error } = await createClient().from("videos").insert(input).select("*, categories(name)").single(); if (error) throw error; const video = data as VideoRecord; setVideos((old) => [video, ...old]); toast.success("Video added."); return video; }
+    try { const { data, error } = await createClient().from("videos").insert(input).select("*, categories(name)").single(); if (error) throw error; const video = data as VideoRecord; setVideos((old) => [video, ...old]); return video; }
     catch { toast.error("Could not add video. Check the URL and category."); return null; }
   }
   async function update(id: string, input: Partial<Omit<VideoRecord, "id" | "created_at" | "updated_at" | "categories">>) {

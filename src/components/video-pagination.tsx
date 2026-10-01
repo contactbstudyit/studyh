@@ -1,5 +1,7 @@
 "use client";
 
+import styles from "@/components/video-pagination.module.css";
+
 type PageItem = number | "ellipsis-start" | "ellipsis-end";
 
 function getPageItems(current: number, total: number): PageItem[] {
@@ -16,11 +18,11 @@ function getPageItems(current: number, total: number): PageItem[] {
 
 export default function VideoPagination({ page, totalPages, loading, onPageChange, hideNextOnLast = false }: { page: number; totalPages: number; loading: boolean; onPageChange: (page: number) => void; hideNextOnLast?: boolean }) {
   if (totalPages <= 1) return null;
-  return <nav className="pagination" aria-label="Video pages" style={{ gap: 8, flexWrap: "wrap" }}>
-    {page > 1 && <button type="button" onClick={() => onPageChange(page - 1)} disabled={loading} style={{ minHeight: 34, padding: "8px 11px" }}>← Previous</button>}
-    <div className="page-numbers" style={{ display: "flex", alignItems: "center", gap: 4 }}>{getPageItems(page, totalPages).map((item) => typeof item === "number"
-      ? <button key={item} type="button" className={item === page ? "page-number category-chip selected" : "page-number category-chip"} aria-current={item === page ? "page" : undefined} onClick={() => onPageChange(item)} disabled={loading} style={{ minWidth: 34, height: 34, padding: "0 8px" }}>{item}</button>
-      : <span key={item} aria-hidden="true" style={{ padding: "0 3px", color: "#777", fontSize: 11 }}>…</span>)}</div>
-    {(!hideNextOnLast || page < totalPages) && <button type="button" onClick={() => onPageChange(page + 1)} disabled={loading} style={{ minHeight: 34, padding: "8px 11px" }}>Next →</button>}
+  return <nav className={styles.container} aria-label="Video pages">
+    {page > 1 && <button className={styles.button} type="button" onClick={() => onPageChange(page - 1)} disabled={loading}>← Previous</button>}
+    <div className={styles.numbers}>{getPageItems(page, totalPages).map((item) => typeof item === "number"
+      ? <button key={item} type="button" className={`${styles.button} ${item === page ? styles.numberActive : ""}`} aria-current={item === page ? "page" : undefined} onClick={() => onPageChange(item)} disabled={loading}>{item}</button>
+      : <span key={item} className={styles.ellipsis} aria-hidden="true">…</span>)}</div>
+    {(!hideNextOnLast || page < totalPages) && <button className={styles.button} type="button" onClick={() => onPageChange(page + 1)} disabled={loading}>Next →</button>}
   </nav>;
 }

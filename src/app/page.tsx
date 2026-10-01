@@ -50,6 +50,7 @@ function VideoPlayer({ video }: { video: VideoRecord }) {
   });
   const videoRef = useRef<HTMLVideoElement>(null);
   const playbackReportedRef = useRef(false);
+  const hlsManagedRef = useRef(false);
   useEffect(() => {
     const element = videoRef.current;
     if (!element) return;
@@ -61,6 +62,7 @@ function VideoPlayer({ video }: { video: VideoRecord }) {
     const host = getSourceHost(video.video_url);
     const initialType = resolvedType;
     playbackReportedRef.current = false;
+    hlsManagedRef.current = false;
     setFailure(""); setLoading(true); setSourceType(initialType);
     setDiagnostics({ status: null, contentType: null, finalHost: null, error: null, sourceType: initialType, hlsType: null, hlsDetails: null, hlsStatus: null, hlsUrl: null, mediaErrorCode: null });
     if (process.env.NODE_ENV === "development") console.info("[video-playback] source selected", { sourceHost: host, sourceType: initialType, hasThumbnail: Boolean(video.thumbnail_url), attempt });
@@ -119,6 +121,7 @@ function VideoPlayer({ video }: { video: VideoRecord }) {
             if (!active) return;
             if (!HlsPlayer.isSupported()) { fail({ hlsType: "unsupported", hlsDetails: "HLS is not supported by this browser" }); return; }
             hls = new HlsPlayer({ enableWorker: true, lowLatencyMode: false });
+            hlsManagedRef.current = true;
             hls.on(HlsPlayer.Events.MEDIA_ATTACHED, () => {
               if (process.env.NODE_ENV === "development") console.info("[video-playback] HLS media attached", { sourceHost: host });
             });
@@ -167,12 +170,16 @@ function VideoPlayer({ video }: { video: VideoRecord }) {
         fail({ hlsType: "player initialization", hlsDetails: details });
       }
     })();
-    return () => { active = false; hls?.destroy(); dash?.reset(); element.pause(); element.removeAttribute("src"); element.load(); };
+    return () => { active = false; hlsManagedRef.current = false; hls?.destroy(); dash?.reset(); element.pause(); element.removeAttribute("src"); element.load(); };
   }, [video.video_url, attempt]);
 
   function handleMediaError(event: React.SyntheticEvent<HTMLVideoElement>) {
     if (failure) return;
     const mediaErrorCode = event.currentTarget.error?.code ?? null;
+    if (sourceType === "hls" && hlsManagedRef.current) {
+      if (process.env.NODE_ENV === "development") console.warn("[video-playback] HTMLMediaElement emitted an error while hls.js is recovering; waiting for HLS fatal status", { sourceHost: getSourceHost(video.video_url), mediaErrorCode, mediaErrorMessage: event.currentTarget.error?.message });
+      return;
+    }
     const reason = getPlaybackFailureReason({ sourceType, httpStatus: diagnostics.status, probeError: diagnostics.error, mediaErrorCode, hlsType: diagnostics.hlsType, hlsDetails: diagnostics.hlsDetails, hlsStatus: diagnostics.hlsStatus });
     setDiagnostics((current) => ({ ...current, mediaErrorCode }));
     setLoading(false); setFailure(reason);

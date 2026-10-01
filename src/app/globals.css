@@ -55,6 +55,18 @@ body { background: #000; color: #fff; font-family: var(--font-geist-sans), syste
 .card-meta { margin: 8px 0 4px; color: #999; font-size: 10px; letter-spacing: 0; text-transform: none; }
 .card-category-link { color: inherit; text-decoration: none; }.card-category-link:hover { color: #fff; text-decoration: underline; text-underline-offset: 3px; }
 .category-description { margin: 7px 0 0; color: #888; font-size: 11px; line-height: 1.5; }
+.category-topbar { gap: 0; }
+.category-header-actions { gap: 10px; }
+.sort-control { position: relative; flex: 0 0 auto; }
+.sort-trigger { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 35px; padding: 0 11px; border: 1px solid #292929; border-radius: 4px; background: #0c0c0c; color: #c9c9c9; font-size: 10px; white-space: nowrap; cursor: pointer; }
+.sort-trigger:hover,.sort-trigger[aria-expanded="true"] { border-color: #4a4a4a; background: #141414; color: #fff; }
+.sort-popover { position: absolute; z-index: 40; top: calc(100% + 8px); right: 0; display: flex; flex-direction: column; width: 220px; max-height: min(70vh,420px); overflow-y: auto; padding: 5px; border: 1px solid #292929; border-radius: 6px; background: #0d0d0d; box-shadow: 0 15px 42px rgba(0,0,0,.6); }
+.sort-option { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 34px; padding: 0 10px; border: 0; border-radius: 3px; background: transparent; color: #aaa; text-align: left; font-size: 10px; cursor: pointer; }
+.sort-option:hover:not(:disabled),.sort-option.selected { background: #191919; color: #fff; }
+.sort-option:disabled { color: #626262; cursor: not-allowed; }
+.sort-note { margin: 5px 8px 7px; padding-top: 8px; border-top: 1px solid #222; color: #777; font-size: 9px; line-height: 1.45; }
+.category-result-count { display: block; margin: -4px 0 14px; text-align: right; }
+@media (max-width: 720px) { .category-topbar { padding: 0 14px; }.category-header-actions { gap: 7px; }.sort-trigger { min-height: 33px; padding: 0 8px; gap: 5px; font-size: 9px; }.sort-popover { width: min(220px,calc(100vw - 28px)); max-height: 65vh; } }
 .card-title { color: #f2f2f2; font-family: var(--font-geist-sans),system-ui,sans-serif; font-size: 14px; line-height: 1.4; font-weight: 500; }
 .card-description { color: #888; font-size: 11px; margin-top: 4px; }
 .footer { background: #080808; padding: 18px 4.2%; }

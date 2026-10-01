@@ -8,6 +8,7 @@ export type Category = { id: string; name: string; description: string; image_ur
 export type CategoryOption = Pick<Category, "id" | "name">;
 export type VideoRecord = { id: string; title: string; video_url: string; description: string; thumbnail_url: string | null; category_id: string; tags: string[]; duration: string; views: number; featured: boolean; published: boolean; created_at: string; updated_at: string; categories?: { name: string } | null };
 export type LibraryStats = { total_videos: number; published_videos: number; total_categories: number; total_views: number };
+export type VideoSort = "latest" | "oldest" | "most-watched" | "least-watched" | "a-z" | "z-a" | "random" | "most-liked" | "highest-rated" | "lowest-rated";
 const PAGE_SIZE = 20;
 
 export function useCategories() {
@@ -129,8 +130,8 @@ export function useLibraryStats() {
   return { stats, refresh };
 }
 
-export function useVideos(options: { categoryId?: string; search?: string; searchCategoryIds?: string[]; admin?: boolean; published?: boolean; enabled?: boolean } = {}) {
-  const { admin = false, categoryId, search, published, enabled = true } = options;
+export function useVideos(options: { categoryId?: string; search?: string; searchCategoryIds?: string[]; admin?: boolean; published?: boolean; enabled?: boolean; sort?: VideoSort } = {}) {
+  const { admin = false, categoryId, search, published, enabled = true, sort = "latest" } = options;
   const searchCategoryIds = options.searchCategoryIds?.join(",") ?? "";
   const [videos, setVideos] = useState<VideoRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -140,7 +141,13 @@ export function useVideos(options: { categoryId?: string; search?: string; searc
     setLoading(true);
     try {
       const client = createClient();
-      let request = client.from("videos").select("*, categories(name)").order("created_at", { ascending: false }).range(nextPage * PAGE_SIZE, nextPage * PAGE_SIZE + PAGE_SIZE - 1);
+      let request = client.from("videos").select("*, categories(name)").range(nextPage * PAGE_SIZE, nextPage * PAGE_SIZE + PAGE_SIZE - 1);
+      if (sort === "oldest") request = request.order("created_at", { ascending: true });
+      else if (sort === "most-watched") request = request.order("views", { ascending: false }).order("created_at", { ascending: false });
+      else if (sort === "least-watched") request = request.order("views", { ascending: true }).order("created_at", { ascending: false });
+      else if (sort === "a-z") request = request.order("title", { ascending: true });
+      else if (sort === "z-a") request = request.order("title", { ascending: false });
+      else request = request.order("created_at", { ascending: false });
       if (!admin) request = request.eq("published", true);
       else if (published !== undefined) request = request.eq("published", published);
       if (categoryId) request = request.eq("category_id", categoryId);
@@ -157,7 +164,7 @@ export function useVideos(options: { categoryId?: string; search?: string; searc
       setHasMore(rows.length === PAGE_SIZE); setPage(nextPage);
     } catch { toast.error("Could not load videos."); }
     finally { setLoading(false); }
-  }, [admin, categoryId, search, searchCategoryIds, published]);
+  }, [admin, categoryId, search, searchCategoryIds, published, sort]);
   useEffect(() => { if (enabled) void fetchPage(0); }, [enabled, fetchPage]);
   const refresh = useCallback(() => fetchPage(0), [fetchPage]);
   async function create(input: Omit<VideoRecord, "id" | "created_at" | "updated_at" | "views" | "categories">): Promise<VideoRecord | null> {

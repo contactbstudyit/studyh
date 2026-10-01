@@ -17,7 +17,7 @@ create table if not exists public.videos (
   thumbnail_url text check (thumbnail_url is null or thumbnail_url ~ '^https://[^[:space:]/]+([/?#]|$)'),
   category_id uuid not null references public.categories(id) on delete restrict,
   tags text[] not null default '{}' check (cardinality(tags) <= 30),
-  search_vector tsvector generated always as (to_tsvector('english', title || ' ' || description || ' ' || array_to_string(tags, ' '))) stored,
+  search_vector tsvector not null default ''::tsvector,
   duration text not null default '',
   views bigint not null default 0 check (views >= 0),
   featured boolean not null default false,
@@ -43,6 +43,22 @@ create table if not exists public.video_view_events (
   viewed_at timestamptz not null default now(),
   primary key (video_id, viewer_key)
 );
+
+create or replace function public.update_video_search_vector()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  new.search_vector := to_tsvector('english'::regconfig, coalesce(new.title, '') || ' ' || coalesce(new.description, '') || ' ' || array_to_string(coalesce(new.tags, '{}'), ' '));
+  return new;
+end;
+$$;
+
+drop trigger if exists videos_search_vector_update on public.videos;
+create trigger videos_search_vector_update
+before insert or update of title, description, tags on public.videos
+for each row execute function public.update_video_search_vector();
 
 create index if not exists videos_category_created_idx on public.videos(category_id, created_at desc);
 create index if not exists videos_published_created_idx on public.videos(created_at desc) where published = true;

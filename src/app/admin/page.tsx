@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import AdminDashboard from "./dashboard";
+import AdminDashboard from "./dashboard-client";
 
 export const dynamic = "force-dynamic";
 

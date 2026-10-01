@@ -11,7 +11,6 @@ export default function Home() {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<VideoRecord | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [categoriesOpen, setCategoriesOpen] = useState(false);
   const categoriesHook = useCategories();
   const searchCategoryIds = useMemo(() => categoriesHook.categories.filter((category) => category.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())).map((category) => category.id), [categoriesHook.categories, query]);
   const videosHook = useVideos({ categoryId: activeCategory || undefined, search: query, searchCategoryIds });
@@ -23,11 +22,12 @@ export default function Home() {
     <header className="topbar">
       <button className="icon-button mobile-menu" aria-label="Toggle navigation" onClick={() => setMenuOpen(!menuOpen)}><Menu size={18}/></button>
       <Link className="home-link" href="/">Home</Link>
-      <nav className={`topnav ${menuOpen ? "nav-open" : ""}`} aria-label="Categories"><div className="category-nav-wrap"><button className="nav-link" aria-expanded={categoriesOpen} aria-haspopup="menu" onClick={() => setCategoriesOpen((open) => !open)}>Categories</button>{categoriesOpen && <div className="category-nav-menu" role="menu"><button role="menuitem" className={activeCategory === "" ? "category-nav-item selected" : "category-nav-item"} onClick={() => { setActiveCategory(""); setCategoriesOpen(false); }}>All videos</button>{categories.map((category) => <button key={category.id} role="menuitem" className={activeCategory === category.id ? "category-nav-item selected" : "category-nav-item"} onClick={() => { setActiveCategory(category.id); setCategoriesOpen(false); document.getElementById("top")?.scrollIntoView({ behavior: "smooth" }); }}>{category.name}</button>)}</div>}</div></nav>
+      <nav className={`topnav ${menuOpen ? "nav-open" : ""}`} aria-label="Categories"><button className="nav-link" onClick={() => { document.getElementById("categories")?.scrollIntoView({ behavior: "smooth" }); setMenuOpen(false); }}>Categories</button></nav>
       <div className="header-actions"><label className="search-box"><Search size={16}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search videos" aria-label="Search videos"/><kbd><Command size={10}/> K</kbd></label><Link className="admin-trigger" href="/admin"><Settings2 size={15}/><span>Admin</span></Link></div>
     </header>
-    <section className="collection section-wrap public-library" id="top">
+    <section className="collection section-wrap" id="top">
       <div className="section-header"><h1>{categories.find((category) => category.id === activeCategory)?.name ?? "Latest Videos"}</h1><span className="result-count">{videosHook.videos.length}{videosHook.hasMore ? "+" : ""} videos</span></div>
+      <div className="category-strip" id="categories"><div className="category-label">Categories</div><div className="category-chips"><button className={`category-chip ${activeCategory === "" ? "selected" : ""}`} onClick={() => setActiveCategory("")}>All</button>{categories.map((category) => <CategoryPill key={category.id} category={category} selected={activeCategory === category.id} onClick={() => setActiveCategory(category.id)}/>)}</div></div>
       {videosHook.loading && videosHook.videos.length === 0 ? <div className="library-loading"><span className="spinner"/> Loading videos</div> : <div className="video-grid">{videosHook.videos.map((video) => <article className="video-card" key={video.id}><button className="thumbnail-button" onClick={() => setSelected(video)} aria-label={`Watch ${video.title}`}><img loading="lazy" src={video.thumbnail_url || "/film-placeholder.svg"} alt=""/><span className="thumb-shade"/><span className="play-disc"><Play size={17} fill="currentColor"/></span>{video.duration && <span className="duration"><Clock3 size={11}/>{video.duration}</span>}</button><div className="card-meta"><span>{video.categories?.name ?? categories.find((category) => category.id === video.category_id)?.name ?? ""}</span></div><button className="card-title" onClick={() => setSelected(video)}>{video.title}</button>{video.description && <p className="card-description">{video.description}</p>}</article>)}</div>}
       {!videosHook.loading && videosHook.videos.length === 0 && <div className="empty-state"><Search size={22}/><strong>No videos found</strong><span>Try a different search or category.</span></div>}
       {videosHook.hasMore && <div className="pagination"><button onClick={videosHook.loadMore} disabled={videosHook.loading}>{videosHook.loading ? "Loading..." : "Load more videos"}</button></div>}
@@ -36,6 +36,8 @@ export default function Home() {
     {selected && <div className="modal-backdrop" role="presentation" onClick={() => setSelected(null)}><section className="watch-modal" role="dialog" aria-modal="true" aria-label={selected.title} onClick={(event) => event.stopPropagation()}><div className="watch-top"><span><span className="live-dot"/> NOW PLAYING</span><button className="icon-button" onClick={() => setSelected(null)} aria-label="Close player"><X size={19}/></button></div><VideoPlayer video={selected}/><div className="watch-info"><div><span className="eyebrow">{selected.categories?.name ?? categories.find((category) => category.id === selected.category_id)?.name} · {selected.views.toLocaleString()} views</span><h2>{selected.title}</h2><p>{selected.description}</p></div></div><div className="source-note"><Check size={13}/> Streaming directly from its source. Nothing is stored here.</div></section></div>}
   </main>;
 }
+
+function CategoryPill({ category, selected, onClick }: { category: Category; selected: boolean; onClick: () => void }) { return <button className={`category-chip ${selected ? "selected" : ""}`} onClick={onClick}>{category.name}</button>; }
 
 function VideoPlayer({ video }: { video: VideoRecord }) {
   const [failure, setFailure] = useState("");

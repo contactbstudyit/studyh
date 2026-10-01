@@ -49,6 +49,7 @@ function VideoPlayer({ video }: { video: VideoRecord }) {
     sourceType: "unknown", hlsType: null, hlsDetails: null, hlsStatus: null, hlsUrl: null, mediaErrorCode: null,
   });
   const videoRef = useRef<HTMLVideoElement>(null);
+  const playbackReportedRef = useRef(false);
   useEffect(() => {
     const element = videoRef.current;
     if (!element) return;
@@ -59,6 +60,7 @@ function VideoPlayer({ video }: { video: VideoRecord }) {
     let resolvedType = detectSourceType(video.video_url);
     const host = getSourceHost(video.video_url);
     const initialType = resolvedType;
+    playbackReportedRef.current = false;
     setFailure(""); setLoading(true); setSourceType(initialType);
     setDiagnostics({ status: null, contentType: null, finalHost: null, error: null, sourceType: initialType, hlsType: null, hlsDetails: null, hlsStatus: null, hlsUrl: null, mediaErrorCode: null });
     if (process.env.NODE_ENV === "development") console.info("[video-playback] source selected", { sourceHost: host, sourceType: initialType, hasThumbnail: Boolean(video.thumbnail_url), attempt });
@@ -132,7 +134,10 @@ function VideoPlayer({ video }: { video: VideoRecord }) {
               const status = data.response?.code ?? null;
               const actualUrl = data.url ?? data.response?.url ?? null;
               const detail = { hlsType: String(data.type), hlsDetails: String(data.details), hlsStatus: status, hlsUrl: actualUrl };
-              if (process.env.NODE_ENV === "development") console[data.fatal ? "error" : "warn"]("[video-playback] HLS diagnostics", { source: host, type: "HLS", fatal: data.fatal, details: data.details, httpStatus: status, url: actualUrl, error: data.error?.message ?? null });
+              if (process.env.NODE_ENV === "development") {
+                const websiteRequest = status === 401 || status === 403 ? `Blocked (HTTP ${status})` : (status === 0 || status === null) && String(data.type).toLowerCase().includes("network") ? "Blocked (CORS/network; no HTTP status exposed)" : data.fatal ? "Failed" : "Recoverable/nonfatal";
+                console[data.fatal ? "error" : "warn"]("[video-playback] HLS diagnostics", { source: host, format: "HLS", directBrowser: playbackReportedRef.current ? "Playable before failure" : "Not confirmed in this page", websiteHlsRequest: websiteRequest, fatal: data.fatal, details: data.details, httpStatus: status, url: actualUrl, error: data.error?.message ?? null });
+              }
               if (data.fatal) fail(detail);
             });
             hls.loadSource(video.video_url);
@@ -174,6 +179,14 @@ function VideoPlayer({ video }: { video: VideoRecord }) {
     if (process.env.NODE_ENV === "development") console.error("[video-playback] HTMLMediaElement error", { sourceHost: getSourceHost(video.video_url), sourceType, httpStatus: diagnostics.status, contentType: diagnostics.contentType, corsProbeError: diagnostics.error, mediaErrorCode, mediaErrorMessage: event.currentTarget.error?.message, reason });
   }
 
+  function handlePlaybackStarted() {
+    setLoading(false);
+    if (!playbackReportedRef.current && process.env.NODE_ENV === "development") {
+      playbackReportedRef.current = true;
+      console.info("[video-playback] playback confirmed", { source: getSourceHost(video.video_url), format: sourceType.toUpperCase(), directBrowser: "Playable" });
+    }
+  }
+
   const sourceHost = getSourceHost(video.video_url);
   const diagnosticLines = [
     `Source: ${sourceHost}`,
@@ -183,7 +196,7 @@ function VideoPlayer({ video }: { video: VideoRecord }) {
     diagnostics.hlsDetails ? `Player detail: ${diagnostics.hlsDetails}` : null,
   ].filter(Boolean);
   return <div className="player-frame" data-source-type={sourceType}>
-    <video ref={videoRef} controls autoPlay playsInline preload="metadata" poster={video.thumbnail_url || undefined} onLoadedMetadata={() => setLoading(false)} onCanPlay={() => setLoading(false)} onPlaying={() => setLoading(false)} onWaiting={() => setLoading(true)} onError={handleMediaError}/>
+    <video ref={videoRef} controls autoPlay playsInline preload="metadata" poster={video.thumbnail_url || undefined} onLoadedMetadata={() => setLoading(false)} onCanPlay={() => setLoading(false)} onPlaying={handlePlaybackStarted} onWaiting={() => setLoading(true)} onError={handleMediaError}/>
     {loading && !failure && <div className="player-loading"><span className="spinner"/><span>Loading video...</span></div>}
     {failure && <div className="player-error"><Film size={24}/><strong>Unable to play this video</strong><span className="player-reason">{failure}</span><span className="player-diagnostics">{diagnosticLines.join(" · ")}</span><button type="button" onClick={() => { setFailure(""); setAttempt((current) => current + 1); }}>Try again</button></div>}
     <span className="player-hint"><Command size={12}/> SPACE TO PLAY</span>

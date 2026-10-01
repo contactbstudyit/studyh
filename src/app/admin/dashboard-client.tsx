@@ -1,10 +1,10 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Film, FolderOpen, LayoutDashboard, LogOut, Plus, Search, Settings, ShieldCheck, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
-import { Category, useCategories, useLibraryStats, useVideos, VideoRecord } from "@/hooks/use-library";
+import { Category, useCategories, useCategoryOptions, useLibraryStats, useVideos, VideoRecord } from "@/hooks/use-library";
 import { createClient } from "@/lib/supabase/client";
 
 export default function AdminDashboard() {
@@ -13,19 +13,35 @@ export default function AdminDashboard() {
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [publishedFilter, setPublishedFilter] = useState("all");
-  const [videoDialog, setVideoDialog] = useState(false);
   const [categoryDialog, setCategoryDialog] = useState(false);
+  const [quickCategory, setQuickCategory] = useState(false);
+  const [categoryFormError, setCategoryFormError] = useState("");
+  const [selectedCategoryId, setSelectedCategoryId] = useState("");
   const [editingVideo, setEditingVideo] = useState<VideoRecord | null>(null);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const statsHook = useLibraryStats();
   const stats = statsHook.stats;
   const categoriesHook = useCategories();
+  const categoryOptionsHook = useCategoryOptions();
   const searchCategoryIds = categoriesHook.categories.filter((category) => category.name.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())).map((category) => category.id);
   const videosHook = useVideos({ admin: true, search, searchCategoryIds, categoryId: categoryFilter || undefined, published: publishedFilter === "all" ? undefined : publishedFilter === "published" });
 
+  useEffect(() => {
+    if (!categoryDialog) return;
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") setCategoryDialog(false); };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [categoryDialog]);
+
   async function logout() { await createClient().auth.signOut(); router.replace("/admin/login"); router.refresh(); }
-  function openVideo(video?: VideoRecord) { setEditingVideo(video ?? null); setVideoDialog(true); }
-  function openCategory(category?: Category) { setEditingCategory(category ?? null); setCategoryDialog(true); }
+  function openVideo(video?: VideoRecord) {
+    setEditingVideo(video ?? null);
+    setSelectedCategoryId(video?.category_id ?? "");
+    setSection("Add Video");
+    categoriesHook.setErrorMessage("");
+    void categoryOptionsHook.refresh();
+  }
+  function openCategory(category?: Category, quick = false) { setEditingCategory(category ?? null); setQuickCategory(quick); setCategoryFormError(""); setCategoryDialog(true); }
 
   async function submitVideo(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); const form = new FormData(event.currentTarget);
@@ -37,25 +53,42 @@ export default function AdminDashboard() {
     const tags = String(form.get("tags") ?? "").split(",").map((tag) => tag.trim()).filter(Boolean);
     const title = String(form.get("title") ?? "").trim();
     if (!title || title.length > 180 || tags.length > 30) { toast.error("Check the title and use no more than 30 tags."); return; }
-    const data = { title, video_url: url, description: String(form.get("description") ?? "").trim(), thumbnail_url: thumbnail || null, category_id: String(form.get("category_id") ?? ""), tags, duration: String(form.get("duration") ?? "").trim(), featured: form.get("featured") === "on", published: form.get("published") === "on" };
+    const categoryId = String(form.get("category_id") ?? "");
+    if (!categoryId) { toast.error("Choose a category before saving the video."); return; }
+    const data = { title, video_url: url, description: String(form.get("description") ?? "").trim(), thumbnail_url: thumbnail || null, category_id: categoryId, tags, duration: String(form.get("duration") ?? "").trim(), featured: form.get("featured") === "on", published: form.get("published") === "on" };
     const ok = editingVideo ? await videosHook.update(editingVideo.id, data) : await videosHook.create(data);
-    if (ok) { setVideoDialog(false); setEditingVideo(null); setSection("Videos"); await videosHook.refresh(); await categoriesHook.refresh(); await statsHook.refresh(); }
+    if (ok) { setEditingVideo(null); setSection("Videos"); await videosHook.refresh(); await categoriesHook.refresh(); await statsHook.refresh(); }
   }
   async function submitCategory(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); const form = new FormData(event.currentTarget);
-    const imageUrl = String(form.get("image_url") ?? "").trim();
+    setCategoryFormError("");
+    const imageUrl = quickCategory ? "" : String(form.get("image_url") ?? "").trim();
     if (imageUrl) { try { if (new URL(imageUrl).protocol !== "https:") throw new Error(); } catch { toast.error("Category image URL must use HTTPS."); return; } }
     const name = String(form.get("name") ?? "").trim();
     if (!name || name.length > 80) { toast.error("Category name must be between 1 and 80 characters."); return; }
     const data = { name, description: String(form.get("description") ?? "").trim(), image_url: imageUrl || null };
-    const ok = editingCategory ? await categoriesHook.update(editingCategory.id, data) : await categoriesHook.create(data);
-    if (ok) { setCategoryDialog(false); setEditingCategory(null); await statsHook.refresh(); }
+    let category: Category | null = null;
+    if (editingCategory) {
+      const ok = await categoriesHook.update(editingCategory.id, data);
+      if (!ok) { setCategoryFormError(categoriesHook.errorMessage || "Could not update category."); return; }
+      category = { ...editingCategory, ...data, updated_at: new Date().toISOString() };
+    } else {
+      const result = await categoriesHook.create(data);
+      if (!result.category) { setCategoryFormError(result.error || "Could not create category."); return; }
+      category = result.category;
+    }
+    setCategoryDialog(false); setEditingCategory(null); await statsHook.refresh();
+    if (quickCategory && category) {
+      categoryOptionsHook.add(category);
+      setSelectedCategoryId(category.id);
+      await categoryOptionsHook.refresh();
+    } else await categoryOptionsHook.refresh();
   }
   async function removeVideo(id: string) { await videosHook.remove(id); await statsHook.refresh(); await categoriesHook.refresh(); }
   async function toggleVideo(video: VideoRecord, field: "published" | "featured") { await videosHook.update(video.id, { [field]: !video[field] }); await statsHook.refresh(); }
   async function deleteCategory(category: Category) {
     if (!window.confirm(`Delete “${category.name}”? Categories with videos cannot be deleted.`)) return;
-    await categoriesHook.remove(category.id);
+    await categoriesHook.remove(category.id); await categoryOptionsHook.refresh(); await statsHook.refresh();
   }
 
   const nav = [{ name: "Dashboard", icon: LayoutDashboard }, { name: "Videos", icon: Film }, { name: "Add Video", icon: Plus }, { name: "Categories", icon: FolderOpen }, { name: "Settings", icon: Settings }];
@@ -63,11 +96,11 @@ export default function AdminDashboard() {
     <section className="dashboard-content"><header className="dashboard-top"><span>LIBRARY MANAGEMENT</span><button onClick={logout}><LogOut size={14}/> Sign out</button></header>
       {section === "Dashboard" && <><div className="admin-heading"><div><span className="eyebrow">OVERVIEW</span><h1>Dashboard</h1><p>Your library at a glance.</p></div><button className="button-primary" onClick={() => openVideo()}><Plus size={15}/> Add video</button></div><div className="stats-row"><Stat label="Total videos" value={stats?.total_videos}/><Stat label="Published" value={stats?.published_videos}/><Stat label="Categories" value={stats?.total_categories}/><Stat label="Total views" value={stats?.total_views}/></div><div className="table-heading"><h2>Recently added</h2><button onClick={() => setSection("Videos")}>Manage videos <ArrowLeft size={13}/></button></div><VideoTable videos={videosHook.videos.slice(0, 6)} categories={categoriesHook.categories} onEdit={openVideo} onDelete={removeVideo} onToggle={toggleVideo}/></>}
       {section === "Videos" && <><div className="admin-heading"><div><span className="eyebrow">LIBRARY</span><h1>Videos</h1><p>Search, update, and publish your collection.</p></div><button className="button-primary" onClick={() => openVideo()}><Plus size={15}/> Add video</button></div><div className="table-tools"><label><Search size={15}/><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search videos"/></label><select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}><option value="">All categories</option>{categoriesHook.categories.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}</select><select value={publishedFilter} onChange={(event) => setPublishedFilter(event.target.value)}><option value="all">All statuses</option><option value="published">Published</option><option value="draft">Unpublished</option></select></div><VideoTable videos={videosHook.videos} categories={categoriesHook.categories} onEdit={openVideo} onDelete={removeVideo} onToggle={toggleVideo}/>{videosHook.hasMore && <button className="load-admin" onClick={videosHook.loadMore}>Load more</button>}</>}
+      {section === "Add Video" && <><div className="admin-heading add-video-heading"><div><span className="eyebrow">LIBRARY</span><h1>{editingVideo ? "Edit video" : "Add video"}</h1><p>Videos stream directly from their external URLs.</p></div></div><div className="video-editor-card"><form key={editingVideo?.id ?? "new-video"} onSubmit={submitVideo}><label>VIDEO URL<input name="video_url" type="url" required placeholder="https://cdn.example.com/video.mp4" defaultValue={editingVideo?.video_url}/><small>External HTTPS URL only. No video upload.</small></label><label>TITLE<input name="title" required maxLength={180} defaultValue={editingVideo?.title}/></label><div className="category-field"><label htmlFor="video-category">CATEGORY</label><div className="category-control-row"><select id="video-category" name="category_id" required value={selectedCategoryId} onChange={(event) => setSelectedCategoryId(event.target.value)} disabled={categoryOptionsHook.loading || (Boolean(categoryOptionsHook.error) && categoryOptionsHook.categories.length === 0)}><option value="" disabled>{categoryOptionsHook.loading ? "Loading categories..." : categoryOptionsHook.error ? "Categories unavailable" : categoryOptionsHook.categories.length ? "Select category" : "No categories yet — Create category"}</option>{categoryOptionsHook.categories.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}</select><button className="create-category-inline" type="button" onClick={() => openCategory(undefined, true)}><Plus size={14}/> Create category</button></div>{categoryOptionsHook.error && <p className="field-error" role="alert">Could not load categories: {categoryOptionsHook.error} <button type="button" onClick={() => void categoryOptionsHook.refresh()}>Retry</button></p>}{!categoryOptionsHook.error && !categoryOptionsHook.loading && categoryOptionsHook.categories.length === 0 && <p className="field-empty">No categories yet — Create category</p>}</div><label>DESCRIPTION<textarea name="description" rows={3} defaultValue={editingVideo?.description}/></label><label>THUMBNAIL URL<input name="thumbnail_url" type="url" placeholder="https://..." defaultValue={editingVideo?.thumbnail_url ?? ""}/></label><label>TAGS<input name="tags" placeholder="documentary, travel" defaultValue={editingVideo?.tags.join(", ")}/></label><label>DURATION<input name="duration" placeholder="12:34" defaultValue={editingVideo?.duration}/></label><div className="check-row"><label><input type="checkbox" name="featured" defaultChecked={editingVideo?.featured}/> Featured</label><label><input type="checkbox" name="published" defaultChecked={editingVideo?.published ?? true}/> Published</label></div><div className="video-form-actions"><button className="button-primary submit-button" type="submit" disabled={categoryOptionsHook.loading || (Boolean(categoryOptionsHook.error) && categoryOptionsHook.categories.length === 0) || categoriesHook.loading}>{editingVideo ? "Save changes" : "Add video"}</button><button className="cancel-video-button" type="button" onClick={() => { setEditingVideo(null); setSection("Videos"); }}>Cancel</button></div></form></div></>}
       {section === "Categories" && <><div className="admin-heading"><div><span className="eyebrow">ORGANIZE</span><h1>Categories</h1><p>Create and manage library categories.</p></div><button className="button-primary" onClick={() => openCategory()}><Plus size={15}/> Add category</button></div><div className="category-admin-list">{categoriesHook.categories.map((category) => <div className="category-admin-row" key={category.id}><div><strong>{category.name}</strong><span>{category.description || "No description"}</span></div><span>{category.video_count ?? 0} videos</span><button onClick={() => openCategory(category)}>Edit</button><button aria-label={`Delete ${category.name}`} onClick={() => deleteCategory(category)}><Trash2 size={15}/></button></div>)}{categoriesHook.categories.length === 0 && <p className="admin-empty">No categories yet. Create one to organize videos.</p>}</div></>}
       {section === "Settings" && <><div className="admin-heading"><div><span className="eyebrow">ACCOUNT</span><h1>Settings</h1><p>Manage your admin session.</p></div></div><div className="settings-panel"><ShieldCheck size={18}/><div><strong>Protected with Supabase Auth</strong><span>Admin actions are enforced by database row-level security policies.</span></div><button onClick={logout}>Sign out</button></div><p className="admin-note">Video files are never uploaded. Playback streams directly from each external URL.</p></>}
     </section>
-    {videoDialog && <div className="modal-backdrop" onMouseDown={() => setVideoDialog(false)}><section className="add-modal admin-form-modal" onMouseDown={(event) => event.stopPropagation()}><div className="modal-title"><div><span className="eyebrow">VIDEO MANAGEMENT</span><h2>{editingVideo ? "Edit video" : "Add video"}</h2></div><button className="icon-button" onClick={() => setVideoDialog(false)}><X size={18}/></button></div><form onSubmit={submitVideo}><label>VIDEO URL<input name="video_url" type="url" required placeholder="https://cdn.example.com/video.mp4" defaultValue={editingVideo?.video_url}/><small>External HTTPS URL only. No upload field.</small></label><label>TITLE<input name="title" required maxLength={180} defaultValue={editingVideo?.title}/></label><label>CATEGORY<select name="category_id" required defaultValue={editingVideo?.category_id ?? categoriesHook.categories[0]?.id ?? ""}>{categoriesHook.categories.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}</select></label><label>DESCRIPTION<textarea name="description" rows={3} defaultValue={editingVideo?.description}/></label><label>THUMBNAIL URL<input name="thumbnail_url" type="url" placeholder="https://..." defaultValue={editingVideo?.thumbnail_url ?? ""}/></label><label>TAGS<input name="tags" placeholder="documentary, travel" defaultValue={editingVideo?.tags.join(", ")}/></label><label>DURATION<input name="duration" placeholder="12:34" defaultValue={editingVideo?.duration}/></label><div className="check-row"><label><input type="checkbox" name="featured" defaultChecked={editingVideo?.featured}/> Featured</label><label><input type="checkbox" name="published" defaultChecked={editingVideo?.published ?? true}/> Published</label></div><button className="button-primary submit-button" type="submit">{editingVideo ? "Save changes" : "Add video"}</button></form></section></div>}
-    {categoryDialog && <div className="modal-backdrop" onMouseDown={() => setCategoryDialog(false)}><section className="add-modal admin-form-modal" onMouseDown={(event) => event.stopPropagation()}><div className="modal-title"><div><span className="eyebrow">CATEGORY MANAGEMENT</span><h2>{editingCategory ? "Edit category" : "Add category"}</h2></div><button className="icon-button" onClick={() => setCategoryDialog(false)}><X size={18}/></button></div><form onSubmit={submitCategory}><label>NAME<input name="name" required maxLength={80} defaultValue={editingCategory?.name}/></label><label>DESCRIPTION<textarea name="description" rows={3} defaultValue={editingCategory?.description}/></label><label>IMAGE URL<input name="image_url" type="url" defaultValue={editingCategory?.image_url ?? ""}/></label><button className="button-primary submit-button" type="submit">{editingCategory ? "Save changes" : "Create category"}</button></form></section></div>}
+    {categoryDialog && <div className="modal-backdrop category-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setCategoryDialog(false); }}><section className="add-modal category-modal" role="dialog" aria-modal="true" aria-labelledby="category-modal-title"><div className="modal-title"><div><span className="eyebrow">CATEGORY MANAGEMENT</span><h2 id="category-modal-title">{quickCategory ? "Create category" : editingCategory ? "Edit category" : "Create category"}</h2></div><button className="icon-button" type="button" aria-label="Close dialog" onClick={() => setCategoryDialog(false)}><X size={18}/></button></div><form onSubmit={submitCategory}><label>Name<input name="name" required maxLength={80} autoFocus defaultValue={editingCategory?.name}/></label><label>Description (optional)<textarea name="description" rows={3} defaultValue={editingCategory?.description}/></label>{!quickCategory && <label>Image URL<input name="image_url" type="url" defaultValue={editingCategory?.image_url ?? ""}/></label>}{categoryFormError && <p className="field-error" role="alert">{categoryFormError}</p>}<div className="category-modal-actions"><button className="cancel-video-button" type="button" onClick={() => setCategoryDialog(false)}>Cancel</button><button className="button-primary" type="submit">{editingCategory ? "Save changes" : "Create category"}</button></div></form></section></div>}
   </main>;
 }
 

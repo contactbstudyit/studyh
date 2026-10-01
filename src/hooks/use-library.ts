@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 
 export type Category = { id: string; name: string; description: string; image_url: string | null; created_at: string; updated_at: string; video_count?: number };
+export type CategoryOption = Pick<Category, "id" | "name">;
 export type VideoRecord = { id: string; title: string; video_url: string; description: string; thumbnail_url: string | null; category_id: string; tags: string[]; duration: string; views: number; featured: boolean; published: boolean; created_at: string; updated_at: string; categories?: { name: string } | null };
 export type LibraryStats = { total_videos: number; published_videos: number; total_categories: number; total_views: number };
 const PAGE_SIZE = 20;
@@ -12,6 +13,7 @@ const PAGE_SIZE = 20;
 export function useCategories() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
@@ -25,23 +27,77 @@ export function useCategories() {
         if (rows.length < 500) break;
       }
       setCategories(all);
-    } catch { toast.error("Could not load categories."); }
+      setErrorMessage("");
+    } catch (error) {
+      const info = describeSupabaseError(error);
+      setErrorMessage(info);
+      if (process.env.NODE_ENV === "development") console.error("[admin-categories] load failed", info);
+      toast.error(`Could not load categories: ${info}`);
+    }
     finally { setLoading(false); }
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
-  async function create(input: Pick<Category, "name" | "description" | "image_url">) {
-    try { const { data, error } = await createClient().from("categories").insert(input).select().single(); if (error) throw error; setCategories((old) => [...old, data as Category].sort((a, b) => a.name.localeCompare(b.name))); toast.success("Category created."); return true; }
-    catch { toast.error("Could not create category."); return false; }
+  async function create(input: Pick<Category, "name" | "description" | "image_url">): Promise<{ category: Category | null; error: string | null }> {
+    try {
+      const { data, error } = await createClient().from("categories").insert(input).select().single();
+      if (error) throw error;
+      const category = data as Category;
+      setCategories((old) => [...old, category].sort((a, b) => a.name.localeCompare(b.name)));
+      setErrorMessage(""); toast.success("Category created"); return { category, error: null };
+    } catch (error) {
+      const info = describeSupabaseError(error);
+      const message = error && typeof error === "object" && "code" in error && error.code === "23505" ? "A category with this name already exists." : info;
+      setErrorMessage(message);
+      if (process.env.NODE_ENV === "development") console.error("[admin-categories] create failed", info);
+      toast.error(message);
+      return { category: null, error: message };
+    }
   }
   async function update(id: string, input: Partial<Pick<Category, "name" | "description" | "image_url">>) {
-    try { const { data, error } = await createClient().from("categories").update({ ...input, updated_at: new Date().toISOString() }).eq("id", id).select().single(); if (error) throw error; setCategories((old) => old.map((item) => item.id === id ? data as Category : item).sort((a, b) => a.name.localeCompare(b.name))); toast.success("Category updated."); return true; }
-    catch { toast.error("Could not update category."); return false; }
+    try { const { data, error } = await createClient().from("categories").update({ ...input, updated_at: new Date().toISOString() }).eq("id", id).select().single(); if (error) throw error; setCategories((old) => old.map((item) => item.id === id ? data as Category : item).sort((a, b) => a.name.localeCompare(b.name))); setErrorMessage(""); toast.success("Category updated."); return true; }
+    catch (error) { const info = describeSupabaseError(error); const message = error && typeof error === "object" && "code" in error && error.code === "23505" ? "A category with this name already exists." : info; setErrorMessage(message); if (process.env.NODE_ENV === "development") console.error("[admin-categories] update failed", info); toast.error(message); return false; }
   }
   async function remove(id: string) {
     try { const { count, error: countError } = await createClient().from("videos").select("id", { count: "exact", head: true }).eq("category_id", id); if (countError) throw countError; if (count) { toast.error("Move or delete its videos before removing this category."); return false; } const { error } = await createClient().from("categories").delete().eq("id", id); if (error) throw error; setCategories((old) => old.filter((item) => item.id !== id)); toast.success("Category deleted."); return true; }
-    catch { toast.error("Could not delete category."); return false; }
+    catch (error) { const info = describeSupabaseError(error); setErrorMessage(info); if (process.env.NODE_ENV === "development") console.error("[admin-categories] delete failed", info); toast.error(info); return false; }
   }
-  return { categories, loading, refresh, create, update, remove };
+  return { categories, loading, errorMessage, setErrorMessage, refresh, create, update, remove };
+}
+
+export function useCategoryOptions() {
+  const [categories, setCategories] = useState<CategoryOption[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const refresh = useCallback(async () => {
+    setLoading(true); setError("");
+    try {
+      const client = createClient();
+      const all: CategoryOption[] = [];
+      for (let offset = 0; ; offset += 500) {
+        const { data, error } = await client.from("categories").select("id,name").order("name", { ascending: true }).range(offset, offset + 499);
+        if (error) throw error;
+        all.push(...((data ?? []) as CategoryOption[]));
+        if (!data || data.length < 500) break;
+      }
+      setCategories(all);
+      return all;
+    } catch (error) {
+      const info = describeSupabaseError(error);
+      setError(info);
+      if (process.env.NODE_ENV === "development") console.error("[admin-category-options] load failed", info);
+      return null;
+    } finally { setLoading(false); }
+  }, []);
+  function add(category: CategoryOption) {
+    setCategories((old) => old.some((item) => item.id === category.id) ? old : [...old, category].sort((a, b) => a.name.localeCompare(b.name)));
+  }
+  return { categories, loading, error, refresh, add };
+}
+
+function describeSupabaseError(error: unknown) {
+  if (!error || typeof error !== "object") return String(error || "Unknown Supabase error");
+  const item = error as { message?: unknown; code?: unknown; details?: unknown; hint?: unknown };
+  return [item.message, item.code && `code=${String(item.code)}`, item.details && `details=${String(item.details)}`, item.hint && `hint=${String(item.hint)}`].filter(Boolean).join(" · ") || "Unknown Supabase error";
 }
 
 export function useLibraryStats() {

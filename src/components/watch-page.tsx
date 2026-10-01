@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { ArrowLeft, ArrowRight, Clock3, Command, Film, Play, Search, Settings2 } from "lucide-react";
+import { ArrowRight, Clock3, Command, Film, Play, Search, Settings2 } from "lucide-react";
 import Link from "next/link";
 import { useRecommendedVideos, recordPublicVideoView } from "@/hooks/use-library";
 import type { VideoRecord } from "@/hooks/use-library";
@@ -29,8 +29,6 @@ export default function WatchPage({ video }: { video: VideoRecord }) {
 
   return <main className="site-shell watch-page-shell">
     <header className="topbar watch-page-topbar">
-      <Link className="home-link" href="/"><ArrowLeft size={14}/> Home</Link>
-      <nav className="topnav" aria-label="Categories"><Link className="nav-link" href="/#categories">Categories</Link></nav>
       <div className="header-actions"><form className="watch-search-form" onSubmit={submitSearch}><label className="search-box"><Search size={16}/><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search videos" aria-label="Search videos"/><kbd><Command size={10}/> K</kbd></label></form><Link className="admin-trigger" href="/admin"><Settings2 size={15}/><span>Admin</span></Link></div>
     </header>
 

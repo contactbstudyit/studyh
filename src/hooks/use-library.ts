@@ -160,17 +160,17 @@ export function useVideos(options: { categoryId?: string; search?: string; searc
   }, [admin, categoryId, search, searchCategoryIds, published]);
   useEffect(() => { void fetchPage(0); }, [fetchPage]);
   const refresh = useCallback(() => fetchPage(0), [fetchPage]);
-  async function create(input: Omit<VideoRecord, "id" | "created_at" | "updated_at" | "views" | "categories">) {
-    try { const { data, error } = await createClient().from("videos").insert(input).select("*, categories(name)").single(); if (error) throw error; setVideos((old) => [data as VideoRecord, ...old]); toast.success("Video added."); return true; }
-    catch { toast.error("Could not add video. Check the URL and category."); return false; }
+  async function create(input: Omit<VideoRecord, "id" | "created_at" | "updated_at" | "views" | "categories">): Promise<VideoRecord | null> {
+    try { const { data, error } = await createClient().from("videos").insert(input).select("*, categories(name)").single(); if (error) throw error; const video = data as VideoRecord; setVideos((old) => [video, ...old]); toast.success("Video added."); return video; }
+    catch { toast.error("Could not add video. Check the URL and category."); return null; }
   }
   async function update(id: string, input: Partial<Omit<VideoRecord, "id" | "created_at" | "updated_at" | "categories">>) {
     try { const { data, error } = await createClient().from("videos").update({ ...input, updated_at: new Date().toISOString() }).eq("id", id).select("*, categories(name)").single(); if (error) throw error; setVideos((old) => old.map((item) => item.id === id ? data as VideoRecord : item)); toast.success("Video updated."); return true; }
     catch { toast.error("Could not update video."); return false; }
   }
-  async function remove(id: string) {
-    try { const { error } = await createClient().from("videos").delete().eq("id", id); if (error) throw error; setVideos((old) => old.filter((item) => item.id !== id)); toast.success("Video deleted."); }
-    catch { toast.error("Could not delete video."); }
+  async function remove(id: string): Promise<boolean> {
+    try { const { error } = await createClient().from("videos").delete().eq("id", id); if (error) throw error; setVideos((old) => old.filter((item) => item.id !== id)); toast.success("Video deleted."); return true; }
+    catch { toast.error("Could not delete video."); return false; }
   }
   async function recordView(id: string) {
     try {

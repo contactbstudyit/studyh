@@ -109,6 +109,10 @@ body { background: #000; color: #fff; font-family: var(--font-geist-sans), syste
 .field-error button { margin-left: 7px; border: 0; background: none; color: #fff; text-decoration: underline; cursor: pointer; font-size: inherit; }
 .field-empty { margin: 0; color: #888; font-size: 10px; letter-spacing: 0; }
 .video-form-actions { display: flex; align-items: center; gap: 9px; padding-top: 3px; }
+.thumbnail-status { margin: -9px 0 0; color: #b8b8b8; font-size: 10px; }
+.thumbnail-status.success { color: #b9cbb8; }
+.thumbnail-status.warning { color: #d2b8a3; }
+.thumbnail-error-detail { color: #a29a91; }
 .video-form-actions .submit-button { margin-top: 0; min-width: 120px; }
 .cancel-video-button { padding: 10px 13px; border: 1px solid #333; border-radius: 2px; background: #0c0c0c; color: #bbb; font-size: 10px; cursor: pointer; }
 .cancel-video-button:hover { color: white; border-color: #555; }

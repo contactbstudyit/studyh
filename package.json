@@ -9,6 +9,7 @@
     "typecheck": "NODE_OPTIONS=--max-old-space-size=1024 tsc --noEmit"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1144.0",
     "@hookform/resolvers": "^5.2.2",
     "@ideavo/webpack-tagger": "^1.0.2",
     "@radix-ui/react-accordion": "^1.2.12",

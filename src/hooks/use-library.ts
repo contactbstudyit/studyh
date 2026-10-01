@@ -133,8 +133,19 @@ export function useLibraryStats() {
     try {
       const { data, error } = await createClient().rpc("library_dashboard_stats");
       if (error) throw error;
-      if (data?.[0]) setStats(data[0] as LibraryStats);
-    } catch { toast.error("Could not load dashboard statistics."); }
+      if (!data?.[0]) throw new Error("The statistics RPC returned no rows.");
+      setStats(data[0] as LibraryStats);
+    } catch (error) {
+      const item = error && typeof error === "object" ? error as { message?: unknown; code?: unknown; details?: unknown; hint?: unknown } : null;
+      const info = {
+        message: item?.message == null ? String(error || "Unknown Supabase error") : String(item.message),
+        code: item?.code == null ? null : String(item.code),
+        details: item?.details == null ? null : String(item.details),
+        hint: item?.hint == null ? null : String(item.hint),
+      };
+      if (process.env.NODE_ENV === "development") console.error("[admin-dashboard-stats] RPC library_dashboard_stats failed", info);
+      toast.error(`Dashboard statistics failed: ${info.message}${info.code ? ` (${info.code})` : ""}`);
+    }
   }, []);
   useEffect(() => {
     void refresh();

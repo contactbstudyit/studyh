@@ -32,7 +32,7 @@ export default function Home() {
     setUrlReady(true);
   }, [categoriesHook.loading, categoriesHook.categories, defaultCategory?.id]);
   const searchCategoryIds = useMemo(() => categoriesHook.categories.filter((category) => category.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())).map((category) => category.id), [categoriesHook.categories, query]);
-  const videosHook = useVideos({ categoryId: activeCategory || undefined, search: query, searchCategoryIds, enabled: urlReady, pageNumber: page, pageSize: PUBLIC_PAGE_SIZE });
+  const videosHook = useVideos({ categoryId: activeCategory || undefined, search: query, searchCategoryIds, enabled: urlReady, pageNumber: page, pageSize: PUBLIC_PAGE_SIZE, dailyFeed: true });
   const categories = useMemo(() => categoriesHook.categories, [categoriesHook.categories]);
 
   useEffect(() => {

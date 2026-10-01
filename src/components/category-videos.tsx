@@ -40,7 +40,7 @@ export default function CategoryVideos({ category, initialSort = "latest", initi
   const [randomSeed, setRandomSeed] = useState(1);
   const [filterOpen, setFilterOpen] = useState(false);
   const filterRef = useRef<HTMLDivElement>(null);
-  const videosHook = useVideos({ categoryId: category.id, search: query, admin: false, sort, pageNumber: page, pageSize: PUBLIC_PAGE_SIZE });
+  const videosHook = useVideos({ categoryId: category.id, search: query, admin: false, sort, pageNumber: page, pageSize: PUBLIC_PAGE_SIZE, dailyFeed: true });
   const displayedVideos = useMemo(() => sort === "random"
     ? [...videosHook.videos].sort((left, right) => randomOrderKey(left.id, randomSeed) - randomOrderKey(right.id, randomSeed))
     : videosHook.videos, [videosHook.videos, sort, randomSeed]);

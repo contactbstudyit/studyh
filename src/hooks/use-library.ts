@@ -142,8 +142,8 @@ export function useLibraryStats() {
   return { stats, refresh };
 }
 
-export function useVideos(options: { categoryId?: string; search?: string; searchCategoryIds?: string[]; admin?: boolean; published?: boolean; enabled?: boolean; sort?: VideoSort; pageNumber?: number; pageSize?: number } = {}) {
-  const { admin = false, categoryId, search, published, enabled = true, sort = "latest", pageNumber, pageSize = PAGE_SIZE } = options;
+export function useVideos(options: { categoryId?: string; search?: string; searchCategoryIds?: string[]; admin?: boolean; published?: boolean; enabled?: boolean; sort?: VideoSort; pageNumber?: number; pageSize?: number; dailyFeed?: boolean } = {}) {
+  const { admin = false, categoryId, search, published, enabled = true, sort = "latest", pageNumber, pageSize = PAGE_SIZE, dailyFeed = false } = options;
   const searchCategoryIds = options.searchCategoryIds?.join(",") ?? "";
   const [videos, setVideos] = useState<VideoRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -156,6 +156,20 @@ export function useVideos(options: { categoryId?: string; search?: string; searc
     const currentPageSize = pageNumber === undefined ? PAGE_SIZE : pageSize;
     if (pageNumber !== undefined && !append) setVideos([]);
     try {
+      if (dailyFeed && !admin) {
+        const params = new URLSearchParams({ page: String(currentPage + 1), pageSize: String(currentPageSize), sort });
+        if (categoryId) params.set("categoryId", categoryId);
+        if (search?.trim()) params.set("search", search.trim());
+        const response = await fetch(`/api/public/video-feed?${params.toString()}`, { cache: "no-store" });
+        const payload = await response.json() as { videos?: VideoRecord[]; totalCount?: number; hasMore?: boolean; error?: string };
+        if (!response.ok) throw new Error(payload.error || "Video feed request failed");
+        const rows = payload.videos ?? [];
+        setVideos((old) => append ? [...old, ...rows] : rows);
+        setTotalCount(payload.totalCount ?? 0);
+        setHasMore(Boolean(payload.hasMore));
+        setPage(currentPage);
+        return;
+      }
       const client = createClient();
       let request = client.from("videos").select("*, categories(name)", pageNumber === undefined ? undefined : { count: "exact" });
       if (sort === "oldest") request = request.order("created_at", { ascending: true });
@@ -189,7 +203,7 @@ export function useVideos(options: { categoryId?: string; search?: string; searc
       setPage(currentPage);
     } catch { toast.error("Could not load videos."); }
     finally { setLoading(false); }
-  }, [admin, categoryId, search, searchCategoryIds, published, sort, pageNumber, pageSize]);
+  }, [admin, categoryId, search, searchCategoryIds, published, sort, pageNumber, pageSize, dailyFeed]);
   useEffect(() => { if (enabled) void fetchPage(pageNumber === undefined ? 0 : Math.max(1, pageNumber) - 1); }, [enabled, fetchPage, pageNumber]);
   const refresh = useCallback(() => fetchPage(pageNumber === undefined ? 0 : Math.max(1, pageNumber) - 1), [fetchPage, pageNumber]);
   async function create(input: Omit<VideoRecord, "id" | "created_at" | "updated_at" | "views" | "categories">): Promise<VideoRecord | null> {
@@ -240,52 +254,28 @@ export function useRecommendedVideos(currentVideo: VideoRecord) {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState("");
-  const offsets = useRef({ same: 0, sameCount: null as number | null, other: 0, otherCount: null as number | null });
   const requestLock = useRef(false);
   const requestGeneration = useRef(0);
+  const pageRef = useRef(1);
 
   const loadNext = useCallback(async (reset = false) => {
-    if (reset) { requestGeneration.current++; requestLock.current = false; }
+    if (reset) { requestGeneration.current++; requestLock.current = false; pageRef.current = 1; }
     if (requestLock.current) return;
     const generation = requestGeneration.current;
+    const page = pageRef.current;
     requestLock.current = true;
     if (reset) setInitialLoading(true); else setLoadingMore(true);
     setError("");
     try {
-      const client = createClient();
-      const batch: VideoRecord[] = [];
-      if (offsets.current.sameCount === null || offsets.current.same < offsets.current.sameCount) {
-        const { data, count, error: queryError } = await client.from("videos").select("*, categories(name)", { count: "exact" }).eq("published", true).eq("category_id", currentVideo.category_id).neq("id", currentVideo.id).order("created_at", { ascending: false }).range(offsets.current.same, offsets.current.same + 4);
-        if (generation !== requestGeneration.current) return;
-        if (queryError) throw queryError;
-        const rows = (data ?? []) as VideoRecord[];
-        offsets.current.sameCount = count ?? 0;
-        offsets.current.same += rows.length;
-        batch.push(...rows);
-      }
-
-      const sameRemaining = Math.max(0, (offsets.current.sameCount ?? 0) - offsets.current.same);
-      if (batch.length < 5 && sameRemaining === 0) {
-        if (offsets.current.otherCount === null || offsets.current.other < offsets.current.otherCount) {
-          const needed = 5 - batch.length;
-          const { data, count, error: queryError } = await client.from("videos").select("*, categories(name)", { count: "exact" }).eq("published", true).neq("category_id", currentVideo.category_id).neq("id", currentVideo.id).order("created_at", { ascending: false }).range(offsets.current.other, offsets.current.other + needed - 1);
-          if (generation !== requestGeneration.current) return;
-          if (queryError) throw queryError;
-          const rows = (data ?? []) as VideoRecord[];
-          offsets.current.otherCount = count ?? 0;
-          offsets.current.other += rows.length;
-          batch.push(...rows);
-        }
-      }
-
-      if ((offsets.current.sameCount ?? 0) - offsets.current.same <= 0 && offsets.current.otherCount === null) {
-        const { count, error: countError } = await client.from("videos").select("id", { count: "exact", head: true }).eq("published", true).neq("category_id", currentVideo.category_id).neq("id", currentVideo.id);
-        if (generation !== requestGeneration.current) return;
-        if (countError) throw countError;
-        offsets.current.otherCount = count ?? 0;
-      }
+      const params = new URLSearchParams({ categoryId: currentVideo.category_id, excludeId: currentVideo.id, page: String(page), pageSize: "5", sort: "latest" });
+      const response = await fetch(`/api/public/video-feed?${params.toString()}`, { cache: "no-store" });
+      const payload = await response.json() as { videos?: VideoRecord[]; hasMore?: boolean; error?: string };
+      if (generation !== requestGeneration.current) return;
+      if (!response.ok) throw new Error(payload.error || "Recommendation feed request failed");
+      const batch = payload.videos ?? [];
       setVideos((old) => reset ? batch : [...old, ...batch]);
-      setHasMore(offsets.current.same < (offsets.current.sameCount ?? 0) || offsets.current.other < (offsets.current.otherCount ?? 0));
+      setHasMore(Boolean(payload.hasMore));
+      pageRef.current = page + 1;
     } catch (cause) {
       if (generation !== requestGeneration.current) return;
       const detail = cause && typeof cause === "object" && "message" in cause ? String(cause.message) : String(cause);
@@ -302,7 +292,6 @@ export function useRecommendedVideos(currentVideo: VideoRecord) {
   }, [currentVideo.category_id, currentVideo.id]);
 
   useEffect(() => {
-    offsets.current = { same: 0, sameCount: null, other: 0, otherCount: null };
     setVideos([]); setHasMore(false); setError(""); setInitialLoading(true);
     void loadNext(true);
   }, [loadNext]);

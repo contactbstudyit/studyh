@@ -1,0 +1,19 @@
+.recommendedGrid {
+  min-width: 0;
+}
+
+@media (max-width: 720px) {
+  .recommendedGrid {
+    grid-template-columns: minmax(0, 1fr) !important;
+    row-gap: 22px;
+  }
+
+  .recommendedGrid :global(.thumbnail-button) {
+    aspect-ratio: 16 / 9;
+  }
+
+  .recommendedGrid :global(.card-title) {
+    margin-top: 8px;
+  }
+
+}

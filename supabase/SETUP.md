@@ -1,6 +1,6 @@
 # Supabase setup
 
-1. Apply migrations in order in the Supabase SQL Editor: `202610010001_video_library.sql`, `202610010002_unverified_admin_bootstrap.sql`, and `202610010003_remove_bootstrap_token.sql`. If 001 and 002 were already applied, apply only 003.
+1. Apply migrations in order in the Supabase SQL Editor: `202610010001_video_library.sql`, `202610010002_unverified_admin_bootstrap.sql`, `202610010003_remove_bootstrap_token.sql`, and `202610010004_single_admin_only.sql`. If 001-003 were already applied, apply only 004.
 2. In Supabase Authentication, create the user `contact.eonemusic@gmail.com` with the password you intend to use. Email confirmation can remain disabled.
 3. Grant admin membership to that Auth user in the SQL Editor:
 

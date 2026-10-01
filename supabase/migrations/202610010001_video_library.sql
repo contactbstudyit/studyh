@@ -28,6 +28,7 @@ create table if not exists public.videos (
 
 create table if not exists public.admins (
   user_id uuid primary key references auth.users(id) on delete cascade,
+  singleton boolean not null default true check (singleton),
   created_at timestamptz not null default now()
 );
 

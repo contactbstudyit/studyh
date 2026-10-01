@@ -1,14 +1,16 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { ArrowRight, Command, Film, Play, Search, Settings2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, Command, Film, Play, Search } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useRecommendedVideos, recordPublicVideoView } from "@/hooks/use-library";
 import type { VideoRecord } from "@/hooks/use-library";
 import { VideoPlayer } from "@/components/video-player";
 import styles from "@/components/watch-page.module.css";
 
 export default function WatchPage({ video }: { video: VideoRecord }) {
+  const router = useRouter();
   const [search, setSearch] = useState("");
   const [viewCount, setViewCount] = useState(video.views);
   const [mobileLayout, setMobileLayout] = useState(false);
@@ -39,7 +41,8 @@ export default function WatchPage({ video }: { video: VideoRecord }) {
 
   return <main className="site-shell watch-page-shell">
     <header className="topbar watch-page-topbar">
-      <div className="header-actions"><form className="watch-search-form" onSubmit={submitSearch}><label className="search-box"><Search size={16}/><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search videos" aria-label="Search videos"/><kbd><Command size={10}/> K</kbd></label></form><Link className="admin-trigger" href="/admin"><Settings2 size={15}/><span>Admin</span></Link></div>
+      <button className="icon-button watch-back-button" type="button" aria-label="Go back" onClick={() => { if (window.history.length > 1) router.back(); else router.push("/"); }}><ArrowLeft size={17}/></button>
+      <div className="header-actions"><form className="watch-search-form" onSubmit={submitSearch}><label className="search-box"><Search size={16}/><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search videos" aria-label="Search videos"/><kbd><Command size={10}/> K</kbd></label></form></div>
     </header>
 
     <div className="watch-page-content">

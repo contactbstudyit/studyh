@@ -7,6 +7,7 @@ import { useVideos } from "@/hooks/use-library";
 import type { VideoSort } from "@/hooks/use-library";
 import type { PublicCategory } from "@/lib/category-routes";
 import VideoPagination from "@/components/video-pagination";
+import gridStyles from "@/components/public-video-grid.module.css";
 
 const PUBLIC_PAGE_SIZE = 15;
 
@@ -112,7 +113,7 @@ export default function CategoryVideos({ category, initialSort = "latest", initi
       </div>
     </header>
     <section className="collection section-wrap" id="top">
-      {videosHook.loading && videosHook.videos.length === 0 ? <div className="video-grid skeleton-grid" role="status" aria-label={`Loading ${category.name} videos`}>{Array.from({ length: 6 }, (_, index) => <article className="video-card skeleton-card" key={index}><div className="skeleton-thumbnail"/><div className="skeleton-title"><span/><span/></div></article>)}</div> : <div className="video-grid">{displayedVideos.map((video) => <article className="video-card" key={video.id}><Link className="thumbnail-button" href={`/watch/${video.id}`} aria-label={`Watch ${video.title}`}><img loading="lazy" src={video.thumbnail_url || "/film-placeholder.svg"} alt=""/><span className="thumb-shade"/><span className="play-disc"><Play size={17} fill="currentColor"/></span>{video.duration && <span className="duration"><Clock3 size={11}/>{video.duration}</span>}</Link><Link className="card-title" href={`/watch/${video.id}`}>{video.title}</Link>{video.description && <p className="card-description">{video.description}</p>}</article>)}</div>}
+      {videosHook.loading && videosHook.videos.length === 0 ? <div className={`video-grid public-video-grid ${gridStyles.singleColumn} skeleton-grid`} role="status" aria-label={`Loading ${category.name} videos`}>{Array.from({ length: 6 }, (_, index) => <article className="video-card skeleton-card" key={index}><div className="skeleton-thumbnail"/><div className="skeleton-title"><span/><span/></div></article>)}</div> : <div className={`video-grid public-video-grid ${gridStyles.singleColumn}`}>{displayedVideos.map((video) => <article className="video-card" key={video.id}><Link className="thumbnail-button" href={`/watch/${video.id}`} aria-label={`Watch ${video.title}`}><img loading="lazy" src={video.thumbnail_url || "/film-placeholder.svg"} alt=""/><span className="thumb-shade"/><span className="play-disc"><Play size={17} fill="currentColor"/></span>{video.duration && <span className="duration"><Clock3 size={11}/>{video.duration}</span>}</Link><Link className="card-title" href={`/watch/${video.id}`}>{video.title}</Link>{video.description && <p className="card-description">{video.description}</p>}</article>)}</div>}
       {!videosHook.loading && videosHook.totalCount === 0 && <div className="empty-state"><Search size={22}/><strong>No videos in {category.name} yet</strong><span>Check back later for new videos.</span></div>}
       <VideoPagination page={page} totalPages={totalPages} loading={videosHook.loading} onPageChange={changePage}/>
     </section>

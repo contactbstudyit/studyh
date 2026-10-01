@@ -2,10 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Clock3, Command, Filter, Play, Search, X } from "lucide-react";
-import Link from "next/link";
-import { useCategories, useVideos } from "@/hooks/use-library";
+import { useVideos } from "@/hooks/use-library";
 import type { VideoSort, VideoRecord } from "@/hooks/use-library";
-import { getCategorySlug, slugifyCategory } from "@/lib/category-slug";
 import type { PublicCategory } from "@/lib/category-routes";
 import { VideoPlayer } from "@/components/video-player";
 
@@ -39,9 +37,7 @@ export default function CategoryVideos({ category, initialSort = "latest" }: { c
   const [filterOpen, setFilterOpen] = useState(false);
   const [selected, setSelected] = useState<VideoRecord | null>(null);
   const filterRef = useRef<HTMLDivElement>(null);
-  const categoriesHook = useCategories();
   const videosHook = useVideos({ categoryId: category.id, search: query, admin: false, sort });
-  const categories = useMemo(() => categoriesHook.categories, [categoriesHook.categories]);
   const displayedVideos = useMemo(() => sort === "random"
     ? [...videosHook.videos].sort((left, right) => randomOrderKey(left.id, randomSeed) - randomOrderKey(right.id, randomSeed))
     : videosHook.videos, [videosHook.videos, sort, randomSeed]);
@@ -73,14 +69,6 @@ export default function CategoryVideos({ category, initialSort = "latest" }: { c
     setFilterOpen(false);
   }
 
-  const categoryLink = (video: VideoRecord) => {
-    const item = categories.find((candidate) => candidate.id === video.category_id);
-    const name = video.categories?.name ?? item?.name;
-    if (!name) return null;
-    const slug = item ? getCategorySlug(item, categories) : slugifyCategory(name);
-    return <Link className="card-category-link" href={`/category/${slug}`}>{name}</Link>;
-  };
-
   return <main className="site-shell">
     <header className="topbar category-topbar">
       <div className="header-actions category-header-actions">
@@ -92,7 +80,7 @@ export default function CategoryVideos({ category, initialSort = "latest" }: { c
       </div>
     </header>
     <section className="collection section-wrap" id="top">
-      {videosHook.loading && videosHook.videos.length === 0 ? <div className="video-grid skeleton-grid" role="status" aria-label={`Loading ${category.name} videos`}>{Array.from({ length: 6 }, (_, index) => <article className="video-card skeleton-card" key={index}><div className="skeleton-thumbnail"/><div className="skeleton-meta"><span/></div><div className="skeleton-title"><span/><span/></div></article>)}</div> : <div className="video-grid">{displayedVideos.map((video) => <article className="video-card" key={video.id}><button className="thumbnail-button" onClick={() => setSelected(video)} aria-label={`Watch ${video.title}`}><img loading="lazy" src={video.thumbnail_url || "/film-placeholder.svg"} alt=""/><span className="thumb-shade"/><span className="play-disc"><Play size={17} fill="currentColor"/></span>{video.duration && <span className="duration"><Clock3 size={11}/>{video.duration}</span>}</button><div className="card-meta"><span>{categoryLink(video)}</span></div><button className="card-title" onClick={() => setSelected(video)}>{video.title}</button>{video.description && <p className="card-description">{video.description}</p>}</article>)}</div>}
+      {videosHook.loading && videosHook.videos.length === 0 ? <div className="video-grid skeleton-grid" role="status" aria-label={`Loading ${category.name} videos`}>{Array.from({ length: 6 }, (_, index) => <article className="video-card skeleton-card" key={index}><div className="skeleton-thumbnail"/><div className="skeleton-title"><span/><span/></div></article>)}</div> : <div className="video-grid">{displayedVideos.map((video) => <article className="video-card" key={video.id}><button className="thumbnail-button" onClick={() => setSelected(video)} aria-label={`Watch ${video.title}`}><img loading="lazy" src={video.thumbnail_url || "/film-placeholder.svg"} alt=""/><span className="thumb-shade"/><span className="play-disc"><Play size={17} fill="currentColor"/></span>{video.duration && <span className="duration"><Clock3 size={11}/>{video.duration}</span>}</button><button className="card-title" onClick={() => setSelected(video)}>{video.title}</button>{video.description && <p className="card-description">{video.description}</p>}</article>)}</div>}
       {!videosHook.loading && videosHook.videos.length === 0 && <div className="empty-state"><Search size={22}/><strong>No videos in {category.name} yet</strong><span>Check back later for new videos.</span></div>}
       {videosHook.hasMore && <div className="pagination"><button onClick={videosHook.loadMore} disabled={videosHook.loading}>{videosHook.loading ? "Loading..." : "Load more videos"}</button></div>}
     </section>

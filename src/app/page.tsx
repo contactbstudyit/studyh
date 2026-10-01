@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Check, Clock3, Command, Menu, Play, Search, Settings2, X } from "lucide-react";
 import Link from "next/link";
 import { Category, useCategories, useVideos, VideoRecord } from "@/hooks/use-library";
-import { getCategorySlug, slugifyCategory } from "@/lib/category-slug";
+import { slugifyCategory } from "@/lib/category-slug";
 import { VideoPlayer } from "@/components/video-player";
 
 export default function Home() {
@@ -34,7 +34,7 @@ export default function Home() {
     <section className="collection section-wrap" id="top">
       <div className="section-header"><h1>{categories.find((category) => category.id === activeCategory)?.name ?? "Latest Videos"}</h1><span className="result-count">{videosHook.videos.length}{videosHook.hasMore ? "+" : ""} videos</span></div>
       <div className="category-strip" id="categories"><div className="category-label">Categories</div><div className="category-chips"><button className={`category-chip ${activeCategory === "" ? "selected" : ""}`} onClick={() => setActiveCategory("")}>All</button>{categories.map((category) => <CategoryPill key={category.id} category={category} selected={activeCategory === category.id} onClick={() => setActiveCategory(category.id)}/>)}</div></div>
-      {activeCategory === null || videosHook.loading && videosHook.videos.length === 0 ? <div className="video-grid skeleton-grid" role="status" aria-label="Loading videos">{Array.from({ length: 6 }, (_, index) => <article className="video-card skeleton-card" key={index}><div className="skeleton-thumbnail"/><div className="skeleton-meta"><span/></div><div className="skeleton-title"><span/><span/></div></article>)}</div> : <div className="video-grid">{videosHook.videos.map((video) => <article className="video-card" key={video.id}><button className="thumbnail-button" onClick={() => setSelected(video)} aria-label={`Watch ${video.title}`}><img loading="lazy" src={video.thumbnail_url || "/film-placeholder.svg"} alt=""/><span className="thumb-shade"/><span className="play-disc"><Play size={17} fill="currentColor"/></span>{video.duration && <span className="duration"><Clock3 size={11}/>{video.duration}</span>}</button><div className="card-meta"><span>{videoCategoryLink(video, categories)}</span></div><button className="card-title" onClick={() => setSelected(video)}>{video.title}</button>{video.description && <p className="card-description">{video.description}</p>}</article>)}</div>}
+      {activeCategory === null || videosHook.loading && videosHook.videos.length === 0 ? <div className="video-grid skeleton-grid" role="status" aria-label="Loading videos">{Array.from({ length: 6 }, (_, index) => <article className="video-card skeleton-card" key={index}><div className="skeleton-thumbnail"/><div className="skeleton-title"><span/><span/></div></article>)}</div> : <div className="video-grid">{videosHook.videos.map((video) => <article className="video-card" key={video.id}><button className="thumbnail-button" onClick={() => setSelected(video)} aria-label={`Watch ${video.title}`}><img loading="lazy" src={video.thumbnail_url || "/film-placeholder.svg"} alt=""/><span className="thumb-shade"/><span className="play-disc"><Play size={17} fill="currentColor"/></span>{video.duration && <span className="duration"><Clock3 size={11}/>{video.duration}</span>}</button><button className="card-title" onClick={() => setSelected(video)}>{video.title}</button>{video.description && <p className="card-description">{video.description}</p>}</article>)}</div>}
       {!videosHook.loading && videosHook.videos.length === 0 && <div className="empty-state"><Search size={22}/><strong>No videos found</strong><span>Try a different search or category.</span></div>}
       {videosHook.hasMore && <div className="pagination"><button onClick={videosHook.loadMore} disabled={videosHook.loading}>{videosHook.loading ? "Loading..." : "Load more videos"}</button></div>}
     </section>
@@ -43,11 +43,3 @@ export default function Home() {
 }
 
 function CategoryPill({ category, selected, onClick }: { category: Category; selected: boolean; onClick: () => void }) { return <button className={`category-chip ${selected ? "selected" : ""}`} onClick={onClick}>{category.name}</button>; }
-
-function videoCategoryLink(video: VideoRecord, categories: Category[]) {
-  const category = categories.find((item) => item.id === video.category_id);
-  const name = video.categories?.name ?? category?.name;
-  if (!name) return null;
-  const slug = category ? getCategorySlug(category, categories) : slugifyCategory(name);
-  return <Link className="card-category-link" href={`/category/${slug}`}>{name}</Link>;
-}

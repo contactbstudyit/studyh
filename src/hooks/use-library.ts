@@ -70,21 +70,35 @@ export function useCategoryOptions() {
   const [error, setError] = useState("");
   const refresh = useCallback(async () => {
     setLoading(true); setError("");
+    const development = process.env.NODE_ENV === "development";
+    const projectUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "missing";
+    let projectHost = "invalid Supabase URL";
+    try { projectHost = new URL(projectUrl).host; } catch { /* URL diagnostics report invalid configuration below. */ }
     try {
       const client = createClient();
+      const { data: authData, error: authError } = await client.auth.getUser();
+      if (authError || !authData.user?.id) {
+        const authInfo = authError ? describeSupabaseError(authError) : "No authenticated user returned";
+        if (development) console.error("[admin-category-options] authenticated user lookup failed", { projectUrl, projectHost, userId: authData.user?.id ?? null, error: authInfo });
+        throw new Error(`Could not verify admin session before loading categories: ${authInfo}`);
+      }
+      const userId = authData.user.id;
+      if (development) console.info("[admin-category-options] query started", { projectUrl, projectHost, userId, query: "categories.select(id,name).order(name, ascending)" });
       const all: CategoryOption[] = [];
       for (let offset = 0; ; offset += 500) {
-        const { data, error } = await client.from("categories").select("id,name").order("name", { ascending: true }).range(offset, offset + 499);
-        if (error) throw error;
+        const { data, error: queryError } = await client.from("categories").select("id,name").order("name", { ascending: true }).range(offset, offset + 499);
+        if (development) console.info("[admin-category-options] query response", { userId, projectHost, offset, data, error: queryError ? { message: queryError.message, code: queryError.code, details: queryError.details, hint: queryError.hint } : null, count: data?.length ?? 0 });
+        if (queryError) throw queryError;
         all.push(...((data ?? []) as CategoryOption[]));
         if (!data || data.length < 500) break;
       }
       setCategories(all);
+      if (development) console.info("[admin-category-options] state update scheduled", { userId, projectHost, categories: all, count: all.length });
       return all;
     } catch (error) {
       const info = describeSupabaseError(error);
       setError(info);
-      if (process.env.NODE_ENV === "development") console.error("[admin-category-options] load failed", info);
+      if (development) console.error("[admin-category-options] load failed", { projectUrl, projectHost, error: info });
       return null;
     } finally { setLoading(false); }
   }, []);

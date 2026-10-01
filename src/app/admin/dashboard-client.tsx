@@ -27,6 +27,18 @@ export default function AdminDashboard() {
   const videosHook = useVideos({ admin: true, search, searchCategoryIds, categoryId: categoryFilter || undefined, published: publishedFilter === "all" ? undefined : publishedFilter === "published" });
 
   useEffect(() => {
+    if (process.env.NODE_ENV === "development" && section === "Add Video") {
+      console.info("[admin-category-options] Add Video dropdown render", {
+        categoryCount: categoryOptionsHook.categories.length,
+        categoryIds: categoryOptionsHook.categories.map((category) => category.id),
+        selectedCategoryId,
+        loading: categoryOptionsHook.loading,
+        error: categoryOptionsHook.error || null,
+      });
+    }
+  }, [section, categoryOptionsHook.categories, categoryOptionsHook.loading, categoryOptionsHook.error, selectedCategoryId]);
+
+  useEffect(() => {
     if (!categoryDialog) return;
     const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") setCategoryDialog(false); };
     window.addEventListener("keydown", onKeyDown);

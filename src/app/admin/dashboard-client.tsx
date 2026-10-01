@@ -7,6 +7,10 @@ import { toast } from "sonner";
 import { Category, useCategories, useCategoryOptions, useLibraryStats, useVideos, VideoRecord } from "@/hooks/use-library";
 import { createClient } from "@/lib/supabase/client";
 import { generateVideoThumbnail, isGeneratedThumbnailUrl } from "@/lib/video-thumbnail";
+import { getCategorySlug } from "@/lib/category-slug";
+import VideoPagination from "@/components/video-pagination";
+
+const ADMIN_VIDEO_PAGE_SIZE = 15;
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -14,6 +18,8 @@ export default function AdminDashboard() {
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [publishedFilter, setPublishedFilter] = useState("all");
+  const [videoPage, setVideoPage] = useState(1);
+  const [adminFiltersReady, setAdminFiltersReady] = useState(false);
   const [categoryDialog, setCategoryDialog] = useState(false);
   const [quickCategory, setQuickCategory] = useState(false);
   const [categoryFormError, setCategoryFormError] = useState("");
@@ -30,7 +36,97 @@ export default function AdminDashboard() {
   const categoriesHook = useCategories();
   const categoryOptionsHook = useCategoryOptions();
   const searchCategoryIds = categoriesHook.categories.filter((category) => category.name.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())).map((category) => category.id);
-  const videosHook = useVideos({ admin: true, search, searchCategoryIds, categoryId: categoryFilter || undefined, published: publishedFilter === "all" ? undefined : publishedFilter === "published" });
+  const isVideoSection = section === "Videos";
+  const videosHook = useVideos({ admin: true, search, searchCategoryIds, categoryId: categoryFilter || undefined, published: publishedFilter === "all" ? undefined : publishedFilter === "published", pageNumber: isVideoSection && adminFiltersReady ? videoPage : undefined, pageSize: isVideoSection ? ADMIN_VIDEO_PAGE_SIZE : undefined });
+
+  useEffect(() => {
+    if (categoriesHook.loading || adminFiltersReady) return;
+    const applyUrl = () => {
+      const params = new URLSearchParams(window.location.search);
+      const urlSection = params.get("section");
+      if (urlSection === "videos") setSection("Videos");
+      else if (urlSection === "categories") setSection("Categories");
+      else if (urlSection === "settings") setSection("Settings");
+      const searchValue = params.get("search") ?? "";
+      setSearch(searchValue);
+      const urlCategory = params.get("category");
+      const matched = urlCategory ? categoriesHook.categories.find((item) => getCategorySlug(item, categoriesHook.categories) === urlCategory || item.id === urlCategory) : null;
+      setCategoryFilter(matched?.id ?? "");
+      const urlStatus = params.get("status");
+      setPublishedFilter(urlStatus === "published" || urlStatus === "draft" ? urlStatus : "all");
+      const requestedPage = Number.parseInt(params.get("page") ?? "1", 10);
+      setVideoPage(Number.isFinite(requestedPage) && requestedPage > 0 ? requestedPage : 1);
+    };
+    applyUrl(); setAdminFiltersReady(true);
+  }, [categoriesHook.loading, categoriesHook.categories, adminFiltersReady]);
+
+  useEffect(() => {
+    if (!adminFiltersReady) return;
+    const sync = () => {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("section") === "videos") setSection("Videos");
+      else if (params.get("section") === "categories") setSection("Categories");
+      else if (params.get("section") === "settings") setSection("Settings");
+      else setSection("Dashboard");
+      setSearch(params.get("search") ?? "");
+      const urlCategory = params.get("category");
+      const matched = urlCategory ? categoriesHook.categories.find((item) => getCategorySlug(item, categoriesHook.categories) === urlCategory || item.id === urlCategory) : null;
+      setCategoryFilter(matched?.id ?? "");
+      const status = params.get("status"); setPublishedFilter(status === "published" || status === "draft" ? status : "all");
+      const page = Number.parseInt(params.get("page") ?? "1", 10); setVideoPage(Number.isFinite(page) && page > 0 ? page : 1);
+    };
+    window.addEventListener("popstate", sync);
+    return () => window.removeEventListener("popstate", sync);
+  }, [adminFiltersReady, categoriesHook.categories]);
+
+  function writeVideosUrl(nextPage: number, nextSearch = search, nextCategory = categoryFilter, nextStatus = publishedFilter, replace = true) {
+    const url = new URL(window.location.href);
+    url.searchParams.set("section", "videos");
+    if (nextPage > 1) url.searchParams.set("page", String(nextPage)); else url.searchParams.delete("page");
+    if (nextSearch.trim()) url.searchParams.set("search", nextSearch.trim()); else url.searchParams.delete("search");
+    if (nextCategory) {
+      const category = categoriesHook.categories.find((item) => item.id === nextCategory);
+      url.searchParams.set("category", category ? getCategorySlug(category, categoriesHook.categories) : nextCategory);
+    } else url.searchParams.delete("category");
+    if (nextStatus !== "all") url.searchParams.set("status", nextStatus); else url.searchParams.delete("status");
+    window.history[replace ? "replaceState" : "pushState"](null, "", url);
+  }
+
+  function goToVideos(page = 1, replace = false) {
+    setSection("Videos"); setVideoPage(page);
+    writeVideosUrl(page, search, categoryFilter, publishedFilter, replace);
+  }
+
+  function changeVideoSearch(value: string) {
+    setSearch(value); setVideoPage(1);
+    writeVideosUrl(1, value, categoryFilter, publishedFilter, true);
+  }
+
+  function changeVideoCategory(value: string) {
+    setCategoryFilter(value); setVideoPage(1);
+    writeVideosUrl(1, search, value, publishedFilter, true);
+  }
+
+  function changeVideoStatus(value: string) {
+    setPublishedFilter(value); setVideoPage(1);
+    writeVideosUrl(1, search, categoryFilter, value, true);
+  }
+
+  function navigateSection(name: string) {
+    if (name === "Add Video") { openVideo(); return; }
+    setSection(name);
+    const url = new URL(window.location.href);
+    if (name === "Dashboard") url.searchParams.delete("section"); else url.searchParams.set("section", name.toLowerCase());
+    url.searchParams.delete("page");
+    window.history.pushState(null, "", url);
+  }
+
+  const adminTotalPages = Math.ceil((videosHook.totalCount ?? 0) / ADMIN_VIDEO_PAGE_SIZE);
+  useEffect(() => {
+    if (!adminFiltersReady || section !== "Videos" || videosHook.totalCount === null) return;
+    const lastPage = Math.max(1, adminTotalPages);
+    if (videoPage > lastPage) goToVideos(lastPage, true);
+  }, [adminFiltersReady, section, videosHook.totalCount, adminTotalPages, videoPage]);
 
   useEffect(() => {
     if (process.env.NODE_ENV === "development" && section === "Add Video") {
@@ -89,7 +185,7 @@ export default function AdminDashboard() {
     formElement.reset();
     setSelectedCategoryId("");
     setEditingVideo(null);
-    setSection("Videos");
+    goToVideos(1, true);
     if (!editingVideo) toast.success("Video added successfully");
     void videosHook.refresh();
     void categoriesHook.refresh();
@@ -176,10 +272,10 @@ export default function AdminDashboard() {
   }
 
   const nav = [{ name: "Dashboard", icon: LayoutDashboard }, { name: "Videos", icon: Film }, { name: "Add Video", icon: Plus }, { name: "Categories", icon: FolderOpen }, { name: "Settings", icon: Settings }];
-  return <main className="dashboard-shell"><aside className="dashboard-sidebar"><a href="/" className="dash-back"><ArrowLeft size={15}/> Public library</a><div className="dash-kicker"><ShieldCheck size={15}/> ADMIN</div><nav>{nav.map(({ name, icon: Icon }) => <button key={name} className={section === name ? "dash-nav active" : "dash-nav"} onClick={() => name === "Add Video" ? openVideo() : setSection(name)}><Icon size={16}/>{name}</button>)}</nav><button className="dash-logout" onClick={logout}><LogOut size={15}/> Sign out</button></aside>
+  return <main className="dashboard-shell"><aside className="dashboard-sidebar"><a href="/" className="dash-back"><ArrowLeft size={15}/> Public library</a><div className="dash-kicker"><ShieldCheck size={15}/> ADMIN</div><nav>{nav.map(({ name, icon: Icon }) => <button key={name} className={section === name ? "dash-nav active" : "dash-nav"} onClick={() => navigateSection(name)}><Icon size={16}/>{name}</button>)}</nav><button className="dash-logout" onClick={logout}><LogOut size={15}/> Sign out</button></aside>
     <section className="dashboard-content"><header className="dashboard-top"><span>LIBRARY MANAGEMENT</span><button onClick={logout}><LogOut size={14}/> Sign out</button></header>
-      {section === "Dashboard" && <><div className="admin-heading"><div><span className="eyebrow">OVERVIEW</span><h1>Dashboard</h1><p>Your library at a glance.</p></div><button className="button-primary" onClick={() => openVideo()}><Plus size={15}/> Add video</button></div><div className="stats-row"><Stat label="Total videos" value={stats?.total_videos}/><Stat label="Published" value={stats?.published_videos}/><Stat label="Categories" value={stats?.total_categories}/><Stat label="Total views" value={stats?.total_views}/></div><div className="table-heading"><h2>Recently added</h2><button onClick={() => setSection("Videos")}>Manage videos <ArrowLeft size={13}/></button></div><VideoTable videos={videosHook.videos.slice(0, 6)} categories={categoriesHook.categories} onEdit={openVideo} onDelete={removeVideo} onToggle={toggleVideo} onGenerateThumbnail={generateThumbnailFor} generatingThumbnailIds={generatingThumbnailIds}/></>}
-      {section === "Videos" && <><div className="admin-heading"><div><span className="eyebrow">LIBRARY</span><h1>Videos</h1><p>Search, update, and publish your collection.</p></div><div className="video-header-actions"><button className="secondary-action" onClick={generateMissingThumbnails} disabled={thumbnailBatchRunning}>{thumbnailBatchRunning ? "Generating thumbnails..." : "Generate Missing Thumbnails"}</button><button className="button-primary" onClick={() => openVideo()}><Plus size={15}/> Add video</button></div></div>{thumbnailBatchProgress && <p className="thumbnail-status" role="status">{thumbnailBatchProgress}</p>}<div className="table-tools"><label><Search size={15}/><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search videos"/></label><select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}><option value="">All categories</option>{categoriesHook.categories.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}</select><select value={publishedFilter} onChange={(event) => setPublishedFilter(event.target.value)}><option value="all">All statuses</option><option value="published">Published</option><option value="draft">Unpublished</option></select></div><VideoTable videos={videosHook.videos} categories={categoriesHook.categories} onEdit={openVideo} onDelete={removeVideo} onToggle={toggleVideo} onGenerateThumbnail={generateThumbnailFor} generatingThumbnailIds={generatingThumbnailIds}/>{videosHook.hasMore && <button className="load-admin" onClick={videosHook.loadMore}>Load more</button>}</>}
+      {section === "Dashboard" && <><div className="admin-heading"><div><span className="eyebrow">OVERVIEW</span><h1>Dashboard</h1><p>Your library at a glance.</p></div><button className="button-primary" onClick={() => openVideo()}><Plus size={15}/> Add video</button></div><div className="stats-row"><Stat label="Total videos" value={stats?.total_videos}/><Stat label="Published" value={stats?.published_videos}/><Stat label="Categories" value={stats?.total_categories}/><Stat label="Total views" value={stats?.total_views}/></div><div className="table-heading"><h2>Recently added</h2><button onClick={() => goToVideos()}>Manage videos <ArrowLeft size={13}/></button></div><VideoTable videos={videosHook.videos.slice(0, 6)} categories={categoriesHook.categories} onEdit={openVideo} onDelete={removeVideo} onToggle={toggleVideo} onGenerateThumbnail={generateThumbnailFor} generatingThumbnailIds={generatingThumbnailIds}/></>}
+      {section === "Videos" && <><div className="admin-heading"><div><span className="eyebrow">LIBRARY</span><h1>Videos</h1><p>Search, update, and publish your collection.</p></div><div className="video-header-actions"><button className="secondary-action" onClick={generateMissingThumbnails} disabled={thumbnailBatchRunning}>{thumbnailBatchRunning ? "Generating thumbnails..." : "Generate Missing Thumbnails"}</button><button className="button-primary" onClick={() => openVideo()}><Plus size={15}/> Add video</button></div></div>{thumbnailBatchProgress && <p className="thumbnail-status" role="status">{thumbnailBatchProgress}</p>}<div className="table-tools"><label><Search size={15}/><input value={search} onChange={(event) => changeVideoSearch(event.target.value)} placeholder="Search videos"/></label><select value={categoryFilter} onChange={(event) => changeVideoCategory(event.target.value)}><option value="">All categories</option>{categoriesHook.categories.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}</select><select value={publishedFilter} onChange={(event) => changeVideoStatus(event.target.value)}><option value="all">All statuses</option><option value="published">Published</option><option value="draft">Unpublished</option></select></div><VideoTable videos={videosHook.videos} categories={categoriesHook.categories} onEdit={openVideo} onDelete={removeVideo} onToggle={toggleVideo} onGenerateThumbnail={generateThumbnailFor} generatingThumbnailIds={generatingThumbnailIds}/><VideoPagination page={videoPage} totalPages={adminTotalPages} loading={videosHook.loading} onPageChange={(page) => goToVideos(page, false)} hideNextOnLast/></>}
       {section === "Add Video" && <><div className="admin-heading add-video-heading"><div><span className="eyebrow">LIBRARY</span><h1>{editingVideo ? "Edit video" : "Add video"}</h1><p>Videos stream directly from their external URLs.</p></div></div><div className="video-editor-card"><form key={editingVideo?.id ?? "new-video"} onSubmit={submitVideo}><label>VIDEO URL<input name="video_url" type="url" required placeholder="https://cdn.example.com/video.mp4" defaultValue={editingVideo?.video_url}/><small>External HTTPS URL only. No video upload.</small></label><label>TITLE<input name="title" required maxLength={180} defaultValue={editingVideo?.title}/></label><div className="category-field"><label htmlFor="video-category">CATEGORY</label><div className="category-control-row"><select id="video-category" name="category_id" required value={selectedCategoryId} onChange={(event) => setSelectedCategoryId(event.target.value)} disabled={categoryOptionsHook.loading || (Boolean(categoryOptionsHook.error) && categoryOptionsHook.categories.length === 0)}><option value="" disabled>{categoryOptionsHook.loading ? "Loading categories..." : categoryOptionsHook.error ? "Categories unavailable" : categoryOptionsHook.categories.length ? "Select category" : "No categories yet — Create category"}</option>{categoryOptionsHook.categories.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}</select><button className="create-category-inline" type="button" onClick={() => openCategory(undefined, true)}><Plus size={14}/> Create category</button></div>{categoryOptionsHook.error && <p className="field-error" role="alert">Could not load categories: {categoryOptionsHook.error} <button type="button" onClick={() => void categoryOptionsHook.refresh()}>Retry</button></p>}{!categoryOptionsHook.error && !categoryOptionsHook.loading && categoryOptionsHook.categories.length === 0 && <p className="field-empty">No categories yet — Create category</p>}</div><label>DESCRIPTION<textarea name="description" rows={3} defaultValue={editingVideo?.description}/></label><label>THUMBNAIL URL<input name="thumbnail_url" type="url" placeholder="https://..." defaultValue={editingVideo?.thumbnail_url ?? ""}/><small>Optional — leave empty to automatically generate a thumbnail from the video.</small></label><label>TAGS<input name="tags" placeholder="documentary, travel" defaultValue={editingVideo?.tags.join(", ")}/></label><label>DURATION<input name="duration" placeholder="12:34" defaultValue={editingVideo?.duration}/></label><div className="check-row"><label><input type="checkbox" name="featured" defaultChecked={editingVideo?.featured}/> Featured</label><label><input type="checkbox" name="published" defaultChecked={editingVideo?.published ?? true}/> Published</label></div><div className="video-form-actions"><button className="button-primary submit-button" type="submit" disabled={videoSubmitInProgress}>{videoSubmitInProgress ? "Saving..." : editingVideo ? "Save changes" : "Add video"}</button><button className="cancel-video-button" type="button" onClick={() => { setEditingVideo(null); setSection("Videos"); }}>Cancel</button></div></form></div></>}
       {section === "Categories" && <><div className="admin-heading"><div><span className="eyebrow">ORGANIZE</span><h1>Categories</h1><p>Create and manage library categories.</p></div><button className="button-primary" onClick={() => openCategory()}><Plus size={15}/> Add category</button></div><div className="category-admin-list">{categoriesHook.categories.map((category) => <div className="category-admin-row" key={category.id}><div><strong>{category.name}</strong><span>{category.description || "No description"}</span></div><span>{category.video_count ?? 0} videos</span><button onClick={() => openCategory(category)}>Edit</button><button aria-label={`Delete ${category.name}`} onClick={() => deleteCategory(category)}><Trash2 size={15}/></button></div>)}{categoriesHook.categories.length === 0 && <p className="admin-empty">No categories yet. Create one to organize videos.</p>}</div></>}
       {section === "Settings" && <><div className="admin-heading"><div><span className="eyebrow">ACCOUNT</span><h1>Settings</h1><p>Manage your admin session.</p></div></div><div className="settings-panel"><ShieldCheck size={18}/><div><strong>Protected with Supabase Auth</strong><span>Admin actions are enforced by database row-level security policies.</span></div><button onClick={logout}>Sign out</button></div><p className="admin-note">Video files are never uploaded. Playback streams directly from each external URL.</p></>}

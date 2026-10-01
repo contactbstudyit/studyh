@@ -37,8 +37,6 @@ export default function WatchPage({ video }: { video: VideoRecord }) {
     window.location.assign(url.toString());
   }
 
-  const categoryName = video.categories?.name ?? "";
-
   return <main className="site-shell watch-page-shell">
     <header className="topbar watch-page-topbar">
       <button className="icon-button watch-back-button" type="button" aria-label="Go back" onClick={() => { if (window.history.length > 1) router.back(); else router.push("/"); }}><ArrowLeft size={17}/></button>
@@ -50,7 +48,6 @@ export default function WatchPage({ video }: { video: VideoRecord }) {
         <VideoPlayer video={video}/>
         <div className="watch-page-details">
           <div className="watch-page-title"><h1>{video.title}</h1><span>{viewCount.toLocaleString()} views</span></div>
-          {categoryName && <span className="watch-page-category">{categoryName}</span>}
           {video.description && <p>{video.description}</p>}
         </div>
       </section>

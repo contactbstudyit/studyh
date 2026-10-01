@@ -130,18 +130,22 @@ export function useLibraryStats() {
   return { stats, refresh };
 }
 
-export function useVideos(options: { categoryId?: string; search?: string; searchCategoryIds?: string[]; admin?: boolean; published?: boolean; enabled?: boolean; sort?: VideoSort } = {}) {
-  const { admin = false, categoryId, search, published, enabled = true, sort = "latest" } = options;
+export function useVideos(options: { categoryId?: string; search?: string; searchCategoryIds?: string[]; admin?: boolean; published?: boolean; enabled?: boolean; sort?: VideoSort; pageNumber?: number; pageSize?: number } = {}) {
+  const { admin = false, categoryId, search, published, enabled = true, sort = "latest", pageNumber, pageSize = PAGE_SIZE } = options;
   const searchCategoryIds = options.searchCategoryIds?.join(",") ?? "";
   const [videos, setVideos] = useState<VideoRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [hasMore, setHasMore] = useState(false);
   const [page, setPage] = useState(0);
+  const [totalCount, setTotalCount] = useState<number | null>(null);
   const fetchPage = useCallback(async (nextPage: number, append = false) => {
     setLoading(true);
+    const currentPage = pageNumber === undefined ? nextPage : Math.max(1, pageNumber) - 1;
+    const currentPageSize = pageNumber === undefined ? PAGE_SIZE : pageSize;
+    if (pageNumber !== undefined && !append) setVideos([]);
     try {
       const client = createClient();
-      let request = client.from("videos").select("*, categories(name)").range(nextPage * PAGE_SIZE, nextPage * PAGE_SIZE + PAGE_SIZE - 1);
+      let request = client.from("videos").select("*, categories(name)", pageNumber === undefined ? undefined : { count: "exact" });
       if (sort === "oldest") request = request.order("created_at", { ascending: true });
       else if (sort === "most-watched") request = request.order("views", { ascending: false }).order("created_at", { ascending: false });
       else if (sort === "least-watched") request = request.order("views", { ascending: true }).order("created_at", { ascending: false });
@@ -157,16 +161,25 @@ export function useVideos(options: { categoryId?: string; search?: string; searc
         const tagMatch = !term.includes(" ") ? `,tags.cs.{${term}}` : "";
         request = request.or([`search_vector.wfts(english).${term}`, ...categoryMatches].join(",") + tagMatch);
       }
-      const { data, error } = await request;
+      request = request.range(currentPage * currentPageSize, currentPage * currentPageSize + currentPageSize - 1);
+      const { data, error, count } = await request;
       if (error) throw error;
       const rows = (data ?? []) as VideoRecord[];
       setVideos((old) => append ? [...old, ...rows] : rows);
-      setHasMore(rows.length === PAGE_SIZE); setPage(nextPage);
+      if (pageNumber !== undefined) {
+        const exactCount = count ?? 0;
+        setTotalCount(exactCount);
+        setHasMore((currentPage + 1) * currentPageSize < exactCount);
+      } else {
+        setHasMore(rows.length === PAGE_SIZE);
+        setTotalCount(null);
+      }
+      setPage(currentPage);
     } catch { toast.error("Could not load videos."); }
     finally { setLoading(false); }
-  }, [admin, categoryId, search, searchCategoryIds, published, sort]);
-  useEffect(() => { if (enabled) void fetchPage(0); }, [enabled, fetchPage]);
-  const refresh = useCallback(() => fetchPage(0), [fetchPage]);
+  }, [admin, categoryId, search, searchCategoryIds, published, sort, pageNumber, pageSize]);
+  useEffect(() => { if (enabled) void fetchPage(pageNumber === undefined ? 0 : Math.max(1, pageNumber) - 1); }, [enabled, fetchPage, pageNumber]);
+  const refresh = useCallback(() => fetchPage(pageNumber === undefined ? 0 : Math.max(1, pageNumber) - 1), [fetchPage, pageNumber]);
   async function create(input: Omit<VideoRecord, "id" | "created_at" | "updated_at" | "views" | "categories">): Promise<VideoRecord | null> {
     try { const { data, error } = await createClient().from("videos").insert(input).select("*, categories(name)").single(); if (error) throw error; const video = data as VideoRecord; setVideos((old) => [video, ...old]); toast.success("Video added."); return video; }
     catch { toast.error("Could not add video. Check the URL and category."); return null; }
@@ -213,5 +226,5 @@ export function useVideos(options: { categoryId?: string; search?: string; searc
     } catch { /* View metrics are best-effort and never interrupt playback. */ }
   }
   const loadMore = () => { if (hasMore && !loading) void fetchPage(page + 1, true); };
-  return { videos, loading, hasMore, refresh, loadMore, create, update, remove, getMissingThumbnails, recordView };
+  return { videos, loading, hasMore, page, totalCount, refresh, loadMore, create, update, remove, getMissingThumbnails, recordView };
 }

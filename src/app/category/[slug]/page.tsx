@@ -5,7 +5,7 @@ import { getPublicCategoryBySlug } from "@/lib/category-routes";
 
 export const dynamic = "force-dynamic";
 
-type PageProps = { params: Promise<{ slug: string }> };
+type PageProps = { params: Promise<{ slug: string }>; searchParams: Promise<{ sort?: string | string[]; page?: string | string[]; q?: string | string[] }> };
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { slug } = await params;
@@ -18,9 +18,12 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   };
 }
 
-export default async function CategoryPage({ params }: PageProps) {
-  const { slug } = await params;
+export default async function CategoryPage({ params, searchParams }: PageProps) {
+  const [{ slug }, search] = await Promise.all([params, searchParams]);
   const category = await getPublicCategoryBySlug(slug);
   if (!category) notFound();
-  return <CategoryVideos category={category} />;
+  const sort = Array.isArray(search.sort) ? search.sort[0] : search.sort;
+  const pageValue = Number.parseInt(Array.isArray(search.page) ? search.page[0] : search.page ?? "1", 10);
+  const query = Array.isArray(search.q) ? search.q[0] : search.q ?? "";
+  return <CategoryVideos category={category} initialSort={sort} initialPage={Number.isFinite(pageValue) && pageValue > 0 ? pageValue : 1} initialQuery={query} />;
 }

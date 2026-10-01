@@ -6,6 +6,9 @@ import { useVideos } from "@/hooks/use-library";
 import type { VideoSort, VideoRecord } from "@/hooks/use-library";
 import type { PublicCategory } from "@/lib/category-routes";
 import { VideoPlayer } from "@/components/video-player";
+import VideoPagination from "@/components/video-pagination";
+
+const PUBLIC_PAGE_SIZE = 15;
 
 const sortOptions: { value: VideoSort; label: string; supported: boolean }[] = [
   { value: "latest", label: "Latest", supported: true },
@@ -30,21 +33,28 @@ function randomOrderKey(value: string, seed: number) {
   return hash;
 }
 
-export default function CategoryVideos({ category, initialSort = "latest" }: { category: PublicCategory; initialSort?: string }) {
-  const [query, setQuery] = useState("");
+export default function CategoryVideos({ category, initialSort = "latest", initialPage = 1, initialQuery = "" }: { category: PublicCategory; initialSort?: string; initialPage?: number; initialQuery?: string }) {
+  const [query, setQuery] = useState(initialQuery);
   const [sort, setSort] = useState<VideoSort>(() => readSort(initialSort));
+  const [page, setPage] = useState(initialPage);
   const [randomSeed, setRandomSeed] = useState(1);
   const [filterOpen, setFilterOpen] = useState(false);
   const [selected, setSelected] = useState<VideoRecord | null>(null);
   const filterRef = useRef<HTMLDivElement>(null);
-  const videosHook = useVideos({ categoryId: category.id, search: query, admin: false, sort });
+  const videosHook = useVideos({ categoryId: category.id, search: query, admin: false, sort, pageNumber: page, pageSize: PUBLIC_PAGE_SIZE });
   const displayedVideos = useMemo(() => sort === "random"
     ? [...videosHook.videos].sort((left, right) => randomOrderKey(left.id, randomSeed) - randomOrderKey(right.id, randomSeed))
     : videosHook.videos, [videosHook.videos, sort, randomSeed]);
 
   useEffect(() => { if (selected) void videosHook.recordView(selected.id); }, [selected?.id]);
   useEffect(() => {
-    const handlePopState = () => setSort(readSort(new URLSearchParams(window.location.search).get("sort")));
+    const handlePopState = () => {
+      const params = new URLSearchParams(window.location.search);
+      setSort(readSort(params.get("sort")));
+      setQuery(params.get("q") ?? "");
+      const requestedPage = Number.parseInt(params.get("page") ?? "1", 10);
+      setPage(Number.isFinite(requestedPage) && requestedPage > 0 ? requestedPage : 1);
+    };
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
@@ -65,14 +75,38 @@ export default function CategoryVideos({ category, initialSort = "latest" }: { c
     const url = new URL(window.location.href);
     if (next === "latest") url.searchParams.delete("sort");
     else url.searchParams.set("sort", next);
+    url.searchParams.delete("page");
     window.history.replaceState(null, "", url);
+    setPage(1);
     setFilterOpen(false);
   }
+
+  function changeSearch(value: string) {
+    setQuery(value); setPage(1);
+    const url = new URL(window.location.href);
+    if (value.trim()) url.searchParams.set("q", value.trim()); else url.searchParams.delete("q");
+    url.searchParams.delete("page");
+    window.history.replaceState(null, "", url);
+  }
+
+  function changePage(nextPage: number) {
+    setPage(nextPage);
+    const url = new URL(window.location.href);
+    if (nextPage > 1) url.searchParams.set("page", String(nextPage)); else url.searchParams.delete("page");
+    window.history.pushState(null, "", url);
+  }
+
+  const totalPages = Math.ceil((videosHook.totalCount ?? 0) / PUBLIC_PAGE_SIZE);
+  useEffect(() => {
+    if (videosHook.totalCount === null) return;
+    const lastPage = Math.max(1, Math.ceil(videosHook.totalCount / PUBLIC_PAGE_SIZE));
+    if (page > lastPage) changePage(lastPage);
+  }, [videosHook.totalCount, page]);
 
   return <main className="site-shell">
     <header className="topbar category-topbar">
       <div className="header-actions category-header-actions">
-        <label className="search-box"><Search size={16}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search videos" aria-label={`Search ${category.name} videos`}/><kbd><Command size={10}/> K</kbd></label>
+        <label className="search-box"><Search size={16}/><input value={query} onChange={(event) => changeSearch(event.target.value)} placeholder="Search videos" aria-label={`Search ${category.name} videos`}/><kbd><Command size={10}/> K</kbd></label>
         <div className="sort-control" ref={filterRef}>
           <button className="sort-trigger" type="button" aria-haspopup="menu" aria-expanded={filterOpen} onClick={() => setFilterOpen((open) => !open)}><Filter size={15}/><span>Filter</span></button>
           {filterOpen && <div className="sort-popover" role="menu" aria-label="Sort videos">{sortOptions.map((option) => <button key={option.value} type="button" role="menuitemradio" aria-checked={sort === option.value} disabled={!option.supported} title={option.supported ? undefined : "Likes and ratings are not stored for videos"} className={`sort-option ${sort === option.value ? "selected" : ""} ${!option.supported ? "unavailable" : ""}`} onClick={() => selectSort(option.value)}><span>{option.label}</span>{sort === option.value && <Check size={14}/>}</button>)}<p className="sort-note">Likes and ratings are not available in this library.</p></div>}
@@ -81,8 +115,8 @@ export default function CategoryVideos({ category, initialSort = "latest" }: { c
     </header>
     <section className="collection section-wrap" id="top">
       {videosHook.loading && videosHook.videos.length === 0 ? <div className="video-grid skeleton-grid" role="status" aria-label={`Loading ${category.name} videos`}>{Array.from({ length: 6 }, (_, index) => <article className="video-card skeleton-card" key={index}><div className="skeleton-thumbnail"/><div className="skeleton-title"><span/><span/></div></article>)}</div> : <div className="video-grid">{displayedVideos.map((video) => <article className="video-card" key={video.id}><button className="thumbnail-button" onClick={() => setSelected(video)} aria-label={`Watch ${video.title}`}><img loading="lazy" src={video.thumbnail_url || "/film-placeholder.svg"} alt=""/><span className="thumb-shade"/><span className="play-disc"><Play size={17} fill="currentColor"/></span>{video.duration && <span className="duration"><Clock3 size={11}/>{video.duration}</span>}</button><button className="card-title" onClick={() => setSelected(video)}>{video.title}</button>{video.description && <p className="card-description">{video.description}</p>}</article>)}</div>}
-      {!videosHook.loading && videosHook.videos.length === 0 && <div className="empty-state"><Search size={22}/><strong>No videos in {category.name} yet</strong><span>Check back later for new videos.</span></div>}
-      {videosHook.hasMore && <div className="pagination"><button onClick={videosHook.loadMore} disabled={videosHook.loading}>{videosHook.loading ? "Loading..." : "Load more videos"}</button></div>}
+      {!videosHook.loading && videosHook.totalCount === 0 && <div className="empty-state"><Search size={22}/><strong>No videos in {category.name} yet</strong><span>Check back later for new videos.</span></div>}
+      <VideoPagination page={page} totalPages={totalPages} loading={videosHook.loading} onPageChange={changePage}/>
     </section>
     {selected && <div className="modal-backdrop" role="presentation" onClick={() => setSelected(null)}><section className="watch-modal" role="dialog" aria-modal="true" aria-label={selected.title} onClick={(event) => event.stopPropagation()}><div className="watch-top"><span><span className="live-dot"/> NOW PLAYING</span><button className="icon-button" onClick={() => setSelected(null)} aria-label="Close player"><X size={19}/></button></div><VideoPlayer video={selected}/><div className="watch-info"><div><span className="eyebrow">{selected.categories?.name ?? category.name} · {selected.views.toLocaleString()} views</span><h2>{selected.title}</h2><p>{selected.description}</p></div></div><div className="source-note"><Check size={13}/> Streaming directly from its source. Nothing is stored here.</div></section></div>}
   </main>;

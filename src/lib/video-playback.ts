@@ -78,11 +78,12 @@ export function getPlaybackFailureReason(input: {
   hlsStatus?: number | null;
 }): string {
   const status = input.hlsStatus ?? input.httpStatus;
+  if (input.sourceType === "hls" && (status === 401 || status === 403)) return `External HLS source rejected the browser request (HTTP ${status}).`;
   if (status === 401 || status === 403) return `The external server rejected the browser request (HTTP ${status}). The URL may require authorization or may have expired.`;
   if (status === 404 || status === 410) return `The external video source is unavailable (HTTP ${status}).`;
   if (input.hlsDetails) {
     const category = input.hlsType ? `${input.hlsType}: ` : "HLS playback error: ";
-    if ((input.hlsStatus ?? 0) === 0 && input.hlsType?.toLowerCase().includes("network")) return "HLS could not read the playlist or segments. The source may be blocked by CORS or the network.";
+    if (input.sourceType === "hls" && (input.hlsStatus === 0 || input.hlsType?.toLowerCase().includes("network"))) return "External HLS source rejected the browser request (CORS or network error).";
     return `${category}${input.hlsDetails}${input.hlsStatus ? ` (HTTP ${input.hlsStatus})` : ""}`;
   }
   if (input.mediaErrorCode === 3) return "The browser received media but could not decode its codec or the media is damaged.";

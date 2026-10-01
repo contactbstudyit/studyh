@@ -44,9 +44,9 @@ function VideoPlayer({ video }: { video: VideoRecord }) {
   const [loading, setLoading] = useState(true);
   const [attempt, setAttempt] = useState(0);
   const [sourceType, setSourceType] = useState<VideoSourceType>("unknown");
-  const [diagnostics, setDiagnostics] = useState<SourceProbe & { sourceType: VideoSourceType; hlsType: string | null; hlsDetails: string | null; hlsStatus: number | null; mediaErrorCode: number | null }>({
+  const [diagnostics, setDiagnostics] = useState<SourceProbe & { sourceType: VideoSourceType; hlsType: string | null; hlsDetails: string | null; hlsStatus: number | null; hlsUrl: string | null; mediaErrorCode: number | null }>({
     status: null, contentType: null, finalHost: null, error: null,
-    sourceType: "unknown", hlsType: null, hlsDetails: null, hlsStatus: null, mediaErrorCode: null,
+    sourceType: "unknown", hlsType: null, hlsDetails: null, hlsStatus: null, hlsUrl: null, mediaErrorCode: null,
   });
   const videoRef = useRef<HTMLVideoElement>(null);
   useEffect(() => {
@@ -60,7 +60,7 @@ function VideoPlayer({ video }: { video: VideoRecord }) {
     const host = getSourceHost(video.video_url);
     const initialType = resolvedType;
     setFailure(""); setLoading(true); setSourceType(initialType);
-    setDiagnostics({ status: null, contentType: null, finalHost: null, error: null, sourceType: initialType, hlsType: null, hlsDetails: null, hlsStatus: null, mediaErrorCode: null });
+    setDiagnostics({ status: null, contentType: null, finalHost: null, error: null, sourceType: initialType, hlsType: null, hlsDetails: null, hlsStatus: null, hlsUrl: null, mediaErrorCode: null });
     if (process.env.NODE_ENV === "development") console.info("[video-playback] source selected", { sourceHost: host, sourceType: initialType, hasThumbnail: Boolean(video.thumbnail_url), attempt });
 
     const recordProbe = (result: SourceProbe) => {
@@ -71,16 +71,17 @@ function VideoPlayer({ video }: { video: VideoRecord }) {
       setDiagnostics((current) => ({ ...current, ...result, sourceType: current.sourceType === "unknown" ? detectedType : current.sourceType }));
       if (process.env.NODE_ENV === "development") console.info("[video-playback] source metadata", { sourceHost: host, sourceType: detectedType, status: result.status, contentType: result.contentType, finalHost: result.finalHost, error: result.error });
     };
-    const probePromise = probeVideoSource(video.video_url);
-    void probePromise.then(recordProbe);
+    const probePromise = initialType === "unknown" ? probeVideoSource(video.video_url) : null;
+    if (probePromise) void probePromise.then(recordProbe);
 
-    const fail = (detail?: { hlsType?: string; hlsDetails?: string; hlsStatus?: number | null }) => {
+    const fail = (detail?: { hlsType?: string; hlsDetails?: string; hlsStatus?: number | null; hlsUrl?: string | null }) => {
       if (!active) return;
       const type = detail?.hlsType ?? null;
       const details = detail?.hlsDetails ?? null;
       const status = detail?.hlsStatus ?? null;
+      const hlsUrl = detail?.hlsUrl ?? null;
       setLoading(false);
-      setDiagnostics((current) => ({ ...current, hlsType: type, hlsDetails: details, hlsStatus: status }));
+      setDiagnostics((current) => ({ ...current, hlsType: type, hlsDetails: details, hlsStatus: status, hlsUrl }));
       const reason = getPlaybackFailureReason({
         sourceType: detectSourceType(video.video_url, probe?.contentType),
         httpStatus: probe?.status ?? null,
@@ -99,7 +100,7 @@ function VideoPlayer({ video }: { video: VideoRecord }) {
     void (async () => {
       try {
         let type = initialType;
-        if (type === "unknown") {
+        if (type === "unknown" && probePromise) {
           const metadata = await probePromise;
           type = detectSourceType(video.video_url, metadata.contentType);
         }
@@ -115,10 +116,9 @@ function VideoPlayer({ video }: { video: VideoRecord }) {
             const HlsPlayer = (await import("hls.js")).default;
             if (!active) return;
             if (!HlsPlayer.isSupported()) { fail({ hlsType: "unsupported", hlsDetails: "HLS is not supported by this browser" }); return; }
-            hls = new HlsPlayer({ enableWorker: true });
+            hls = new HlsPlayer({ enableWorker: true, lowLatencyMode: false });
             hls.on(HlsPlayer.Events.MEDIA_ATTACHED, () => {
               if (process.env.NODE_ENV === "development") console.info("[video-playback] HLS media attached", { sourceHost: host });
-              hls?.loadSource(video.video_url);
             });
             hls.on(HlsPlayer.Events.MANIFEST_PARSED, () => {
               if (!active) return;
@@ -130,10 +130,12 @@ function VideoPlayer({ video }: { video: VideoRecord }) {
             });
             hls.on(HlsPlayer.Events.ERROR, (_event, data) => {
               const status = data.response?.code ?? null;
-              const detail = { hlsType: String(data.type), hlsDetails: String(data.details), hlsStatus: status };
-              if (process.env.NODE_ENV === "development") console[data.fatal ? "error" : "warn"]("[video-playback] HLS error", { sourceHost: host, fatal: data.fatal, ...detail });
+              const actualUrl = data.url ?? data.response?.url ?? null;
+              const detail = { hlsType: String(data.type), hlsDetails: String(data.details), hlsStatus: status, hlsUrl: actualUrl };
+              if (process.env.NODE_ENV === "development") console[data.fatal ? "error" : "warn"]("[video-playback] HLS diagnostics", { source: host, type: "HLS", fatal: data.fatal, details: data.details, httpStatus: status, url: actualUrl, error: data.error?.message ?? null });
               if (data.fatal) fail(detail);
             });
+            hls.loadSource(video.video_url);
             hls.attachMedia(element);
           }
         } else if (type === "dash") {

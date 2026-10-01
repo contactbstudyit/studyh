@@ -57,6 +57,17 @@ export async function saveGeneratedThumbnail(videoId: string, body: Buffer, cont
   return { key, url: `${config.publicBaseUrl.toString().replace(/\/$/, "")}/${key.split("/").map(encodeURIComponent).join("/")}` };
 }
 
+export function isGeneratedR2Thumbnail(videoId: string, thumbnailUrl: string | null | undefined) {
+  const publicBase = process.env.CLOUDFLARE_R2_PUBLIC_URL || process.env.CLOUDFLARE_R2_PUBLIC_BASE_URL;
+  if (!publicBase || !thumbnailUrl) return false;
+  try {
+    const base = new URL(publicBase);
+    const url = new URL(thumbnailUrl);
+    const prefix = `${base.pathname.replace(/\/$/, "")}/video-thumbnails/${videoId}/`;
+    return url.origin === base.origin && decodeURIComponent(url.pathname).startsWith(prefix);
+  } catch { return false; }
+}
+
 export async function deleteGeneratedThumbnail(videoId: string, thumbnailUrl: string) {
   const publicBase = process.env.CLOUDFLARE_R2_PUBLIC_URL || process.env.CLOUDFLARE_R2_PUBLIC_BASE_URL;
   if (!publicBase) return false;

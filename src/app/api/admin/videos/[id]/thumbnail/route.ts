@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { deleteGeneratedThumbnail, saveGeneratedThumbnail } from "@/lib/r2-storage";
+import { deleteGeneratedThumbnail, isGeneratedR2Thumbnail, saveGeneratedThumbnail } from "@/lib/r2-storage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,7 +32,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     const { data: video, error: videoError } = await auth.client.from("videos").select("id,thumbnail_url").eq("id", id).maybeSingle();
     if (videoError) throw videoError;
     if (!video) return NextResponse.json({ error: "Video not found or not accessible" }, { status: 404 });
-    if (video.thumbnail_url) return NextResponse.json({ error: "A thumbnail URL is already set" }, { status: 409 });
+    const previousThumbnail = video.thumbnail_url as string | null;
+    if (previousThumbnail && !isGeneratedR2Thumbnail(id, previousThumbnail)) return NextResponse.json({ error: "A manually supplied thumbnail URL is preserved. Clear it before generating a replacement." }, { status: 409 });
 
     const bytes = Buffer.from(await request.arrayBuffer());
     if (!bytes.length || bytes.length > MAX_IMAGE_BYTES) return NextResponse.json({ error: "Thumbnail image is empty or exceeds the size limit" }, { status: 413 });
@@ -41,11 +42,18 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     if (!isJpeg && !isWebp) return NextResponse.json({ error: "Thumbnail image signature does not match its content type" }, { status: 415 });
 
     const stored = await saveGeneratedThumbnail(id, bytes, contentType as "image/jpeg" | "image/webp");
-    const { data: updated, error: updateError } = await auth.client.from("videos").update({ thumbnail_url: stored.url, updated_at: new Date().toISOString() }).eq("id", id).is("thumbnail_url", null).select("id").maybeSingle();
+    let update = auth.client.from("videos").update({ thumbnail_url: stored.url, updated_at: new Date().toISOString() }).eq("id", id);
+    update = previousThumbnail !== null ? update.eq("thumbnail_url", previousThumbnail) : update.is("thumbnail_url", null);
+    const { data: updated, error: updateError } = await update.select("id").maybeSingle();
     if (updateError || !updated) {
       await deleteGeneratedThumbnail(id, stored.url).catch(() => undefined);
       if (updateError) throw updateError;
       return NextResponse.json({ error: "Video thumbnail changed before the generated image could be saved" }, { status: 409 });
+    }
+    if (previousThumbnail && previousThumbnail !== stored.url) {
+      await deleteGeneratedThumbnail(id, previousThumbnail).catch((error) => {
+        if (process.env.NODE_ENV === "development") console.warn("[video-thumbnail] previous generated object cleanup failed", { videoId: id, error: error instanceof Error ? error.message : "Unknown R2 error" });
+      });
     }
     return NextResponse.json({ thumbnail_url: stored.url }, { status: 201, headers: { "Cache-Control": "no-store" } });
   } catch (error) {

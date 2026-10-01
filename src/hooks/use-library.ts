@@ -172,6 +172,28 @@ export function useVideos(options: { categoryId?: string; search?: string; searc
     try { const { error } = await createClient().from("videos").delete().eq("id", id); if (error) throw error; setVideos((old) => old.filter((item) => item.id !== id)); toast.success("Video deleted."); return true; }
     catch { toast.error("Could not delete video."); return false; }
   }
+  async function getMissingThumbnails(): Promise<Pick<VideoRecord, "id" | "title" | "video_url" | "duration" | "thumbnail_url">[] | null> {
+    try {
+      const client = createClient();
+      const found = new Map<string, Pick<VideoRecord, "id" | "title" | "video_url" | "duration" | "thumbnail_url">>();
+      for (const empty of [false, true]) {
+        for (let offset = 0; ; offset += 500) {
+          let query = client.from("videos").select("id,title,video_url,duration,thumbnail_url").order("created_at", { ascending: false }).range(offset, offset + 499);
+          query = empty ? query.eq("thumbnail_url", "") : query.is("thumbnail_url", null);
+          const { data, error } = await query;
+          if (error) throw error;
+          for (const video of (data ?? []) as Pick<VideoRecord, "id" | "title" | "video_url" | "duration" | "thumbnail_url">[]) found.set(video.id, video);
+          if (!data || data.length < 500) break;
+        }
+      }
+      return [...found.values()];
+    } catch (error) {
+      const detail = error && typeof error === "object" && "message" in error ? String(error.message) : String(error);
+      if (process.env.NODE_ENV === "development") console.error("[video-thumbnail] missing-video query failed", error);
+      toast.error(`Could not load videos missing thumbnails: ${detail}`);
+      return null;
+    }
+  }
   async function recordView(id: string) {
     try {
       const keyName = "video_viewer_key";
@@ -184,5 +206,5 @@ export function useVideos(options: { categoryId?: string; search?: string; searc
     } catch { /* View metrics are best-effort and never interrupt playback. */ }
   }
   const loadMore = () => { if (hasMore && !loading) void fetchPage(page + 1, true); };
-  return { videos, loading, hasMore, refresh, loadMore, create, update, remove, recordView };
+  return { videos, loading, hasMore, refresh, loadMore, create, update, remove, getMissingThumbnails, recordView };
 }

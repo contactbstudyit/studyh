@@ -3,6 +3,12 @@ import { createMediaProxyUrl, detectSourceType, probeVideoSource, supportsNative
 const MEDIA_TIMEOUT_MS = 30_000;
 const MAX_THUMBNAIL_BYTES = 300_000;
 
+export function isGeneratedThumbnailUrl(videoId: string, thumbnailUrl: string | null | undefined) {
+  if (!thumbnailUrl) return false;
+  try { return decodeURIComponent(new URL(thumbnailUrl).pathname).includes(`/video-thumbnails/${videoId}/`); }
+  catch { return false; }
+}
+
 function parseDuration(value: string) {
   const parts = value.trim().split(":").map(Number);
   if (!parts.length || parts.some((part) => !Number.isFinite(part) || part < 0)) return null;
@@ -117,6 +123,9 @@ export async function generateVideoThumbnail(videoUrl: string, durationHint = ""
   video.playsInline = true;
   video.preload = "auto";
   video.controls = false;
+  video.setAttribute("aria-hidden", "true");
+  Object.assign(video.style, { position: "fixed", left: "-2px", top: "-2px", width: "1px", height: "1px", opacity: "0", pointerEvents: "none", zIndex: "-1" });
+  document.body.append(video);
   const proxiedUrl = createMediaProxyUrl(videoUrl);
   let hls: import("hls.js").default | null = null;
   let dash: { initialize: (media: HTMLVideoElement, source: string, autoplay: boolean) => void; reset: () => void } | null = null;
@@ -181,5 +190,6 @@ export async function generateVideoThumbnail(videoUrl: string, durationHint = ""
     video.pause();
     video.removeAttribute("src");
     video.load();
+    video.remove();
   }
 }

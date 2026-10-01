@@ -113,6 +113,12 @@ body { background: #000; color: #fff; font-family: var(--font-geist-sans), syste
 .thumbnail-status.success { color: #b9cbb8; }
 .thumbnail-status.warning { color: #d2b8a3; }
 .thumbnail-error-detail { color: #a29a91; }
+.video-header-actions { display: flex; align-items: center; gap: 8px; }
+.secondary-action { min-height: 38px; padding: 0 12px; border: 1px solid #343434; border-radius: 2px; background: #101010; color: #ddd; font-size: 10px; white-space: nowrap; cursor: pointer; }
+.secondary-action:hover:not(:disabled) { border-color: #5a5a5a; background: #171717; }
+.secondary-action:disabled { opacity: .6; cursor: wait; }
+.video-table-row .row-actions button:disabled { opacity: .55; cursor: wait; }
+.manual-thumbnail-label { align-self: center; color: #777; font-size: 8px; padding: 4px; }
 .video-form-actions .submit-button { margin-top: 0; min-width: 120px; }
 .cancel-video-button { padding: 10px 13px; border: 1px solid #333; border-radius: 2px; background: #0c0c0c; color: #bbb; font-size: 10px; cursor: pointer; }
 .cancel-video-button:hover { color: white; border-color: #555; }
@@ -125,7 +131,7 @@ body { background: #000; color: #fff; font-family: var(--font-geist-sans), syste
 .category-modal input:focus,.category-modal textarea:focus { border-color: #666; }
 .category-modal-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding-top: 2px; }
 .category-modal-actions .button-primary { min-width: 125px; }
-@media (max-width: 650px) { .video-editor-card { padding: 16px; }.category-control-row { flex-direction: column; }.category-control-row select,.create-category-inline { width: 100%; min-height: 39px; }.category-modal { padding: 19px; } }
+@media (max-width: 650px) { .video-editor-card { padding: 16px; }.category-control-row { flex-direction: column; }.category-control-row select,.create-category-inline { width: 100%; min-height: 39px; }.category-modal { padding: 19px; }.video-header-actions { align-items: stretch; flex-direction: column; }.video-header-actions .button-primary,.video-header-actions .secondary-action { justify-content: center; width: 100%; } }
 
 @custom-variant dark (&:is(.dark *));
 

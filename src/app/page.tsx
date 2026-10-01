@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Clock3, Command, Film, Menu, Play, Search, Settings2, ShieldCheck, X } from "lucide-react";
+import { Check, Clock3, Command, Film, Menu, Play, Search, Settings2, X } from "lucide-react";
 import Link from "next/link";
 import { Category, useCategories, useVideos, VideoRecord } from "@/hooks/use-library";
 import { createMediaProxyUrl, detectSourceType, getPlaybackFailureReason, getSourceHost, probeVideoSource, SourceProbe, supportsNativeHls, VideoSourceType } from "@/lib/video-playback";
@@ -32,7 +32,6 @@ export default function Home() {
       {!videosHook.loading && videosHook.videos.length === 0 && <div className="empty-state"><Search size={22}/><strong>No videos found</strong><span>Try a different search or category.</span></div>}
       {videosHook.hasMore && <div className="pagination"><button onClick={videosHook.loadMore} disabled={videosHook.loading}>{videosHook.loading ? "Loading..." : "Load more videos"}</button></div>}
     </section>
-    <footer className="footer"><span>Video library</span><Link href="/admin">Admin sign in <ShieldCheck size={13}/></Link></footer>
     {selected && <div className="modal-backdrop" role="presentation" onClick={() => setSelected(null)}><section className="watch-modal" role="dialog" aria-modal="true" aria-label={selected.title} onClick={(event) => event.stopPropagation()}><div className="watch-top"><span><span className="live-dot"/> NOW PLAYING</span><button className="icon-button" onClick={() => setSelected(null)} aria-label="Close player"><X size={19}/></button></div><VideoPlayer video={selected}/><div className="watch-info"><div><span className="eyebrow">{selected.categories?.name ?? categories.find((category) => category.id === selected.category_id)?.name} · {selected.views.toLocaleString()} views</span><h2>{selected.title}</h2><p>{selected.description}</p></div></div><div className="source-note"><Check size={13}/> Streaming directly from its source. Nothing is stored here.</div></section></div>}
   </main>;
 }

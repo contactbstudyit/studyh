@@ -9,20 +9,20 @@ function getConfiguration(): R2Configuration {
   const accessKeyId = process.env.CLOUDFLARE_R2_ACCESS_KEY_ID;
   const secretAccessKey = process.env.CLOUDFLARE_R2_SECRET_ACCESS_KEY;
   const bucket = process.env.CLOUDFLARE_R2_BUCKET_NAME;
-  const publicBase = process.env.CLOUDFLARE_R2_PUBLIC_BASE_URL;
+  const publicBase = process.env.CLOUDFLARE_R2_PUBLIC_URL || process.env.CLOUDFLARE_R2_PUBLIC_BASE_URL;
   const missing = [
     ["CLOUDFLARE_R2_ACCOUNT_ID", accountId],
     ["CLOUDFLARE_R2_ACCESS_KEY_ID", accessKeyId],
     ["CLOUDFLARE_R2_SECRET_ACCESS_KEY", secretAccessKey],
     ["CLOUDFLARE_R2_BUCKET_NAME", bucket],
-    ["CLOUDFLARE_R2_PUBLIC_BASE_URL", publicBase],
+    ["CLOUDFLARE_R2_PUBLIC_URL", publicBase],
   ].filter(([, value]) => !value).map(([name]) => name);
   if (missing.length) throw new Error(`Persistent R2 thumbnail storage is not configured. Missing server environment variables: ${missing.join(", ")}`);
 
   let publicBaseUrl: URL;
-  try { publicBaseUrl = new URL(publicBase!); } catch { throw new Error("CLOUDFLARE_R2_PUBLIC_BASE_URL must be an HTTPS custom domain"); }
+  try { publicBaseUrl = new URL(publicBase!); } catch { throw new Error("CLOUDFLARE_R2_PUBLIC_URL must be an HTTPS custom domain"); }
   if (publicBaseUrl.protocol !== "https:" || publicBaseUrl.username || publicBaseUrl.password || publicBaseUrl.search || publicBaseUrl.hash) {
-    throw new Error("CLOUDFLARE_R2_PUBLIC_BASE_URL must be a clean HTTPS URL without credentials, query, or fragment");
+    throw new Error("CLOUDFLARE_R2_PUBLIC_URL must be a clean HTTPS URL without credentials, query, or fragment");
   }
   publicBaseUrl.pathname = publicBaseUrl.pathname.replace(/\/+$/, "");
 
@@ -58,7 +58,7 @@ export async function saveGeneratedThumbnail(videoId: string, body: Buffer, cont
 }
 
 export async function deleteGeneratedThumbnail(videoId: string, thumbnailUrl: string) {
-  const publicBase = process.env.CLOUDFLARE_R2_PUBLIC_BASE_URL;
+  const publicBase = process.env.CLOUDFLARE_R2_PUBLIC_URL || process.env.CLOUDFLARE_R2_PUBLIC_BASE_URL;
   if (!publicBase) return false;
   let url: URL;
   let baseUrl: URL;

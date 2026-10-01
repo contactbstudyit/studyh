@@ -96,13 +96,6 @@ body { background: #000; color: #fff; font-family: var(--font-geist-sans), syste
 .pagination { display: flex; justify-content: center; padding: 28px 0 8px; }
 .pagination button,.load-admin { border: 1px solid #2a2a2a; border-radius: 3px; background: #101010; color: #ddd; padding: 10px 17px; font-size: 11px; cursor: pointer; }
 .pagination button:disabled { opacity: .5; cursor: wait; }
-.video-pagination { display: flex; align-items: center; justify-content: center; gap: 9px; padding: 28px 0 8px; }
-.page-numbers { display: flex; align-items: center; gap: 4px; }
-.video-pagination button { display: inline-flex; min-width: 34px; height: 34px; align-items: center; justify-content: center; padding: 0 10px; border: 1px solid #292929; border-radius: 4px; background: #0b0b0b; color: #bcbcbc; font-size: 10px; cursor: pointer; }
-.video-pagination button:hover:not(:disabled) { border-color: #555; color: #fff; background: #151515; }
-.video-pagination button.active { border-color: #777; background: #e8e8e8; color: #0a0a0a; }
-.video-pagination button:disabled { opacity: .42; cursor: default; }
-.page-ellipsis { padding: 0 3px; color: #777; font-size: 11px; }
 .auth-page { min-height: 100vh; background: #000; display: grid; place-items: center; padding: 20px; }
 .auth-mode { border: 0; background: transparent; color: #aaa; cursor: pointer; font-size: 10px; padding: 4px; }.auth-mode:hover { color: white; }.auth-notice { padding: 10px; background: #101610; border: 1px solid #263526; color: #becdb9; font-size: 10px; line-height: 1.5; }
 .auth-card { width: min(380px,100%); padding: 30px; background: #0b0b0b; border: 1px solid #222; display: flex; flex-direction: column; gap: 14px; color: #ddd; }
@@ -163,7 +156,6 @@ body { background: #000; color: #fff; font-family: var(--font-geist-sans), syste
 .category-modal-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding-top: 2px; }
 .category-modal-actions .button-primary { min-width: 125px; }
 @media (max-width: 650px) { .video-editor-card { padding: 16px; }.category-control-row { flex-direction: column; }.category-control-row select,.create-category-inline { width: 100%; min-height: 39px; }.category-modal { padding: 19px; }.video-header-actions { align-items: stretch; flex-direction: column; }.video-header-actions .button-primary,.video-header-actions .secondary-action { justify-content: center; width: 100%; } }
-@media (max-width: 520px) { .video-pagination { gap: 4px; flex-wrap: wrap; }.video-pagination button { min-width: 30px; height: 32px; padding: 0 7px; font-size: 9px; }.page-numbers { gap: 2px; } }
 
 @custom-variant dark (&:is(.dark *));
 

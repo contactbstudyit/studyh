@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 
 export type Category = { id: string; name: string; description: string; image_url: string | null; created_at: string; updated_at: string; video_count?: number };
 export type CategoryOption = Pick<Category, "id" | "name">;
-export type VideoRecord = { id: string; title: string; video_url: string; description: string; thumbnail_url: string | null; category_id: string; tags: string[]; duration: string; views: number; featured: boolean; published: boolean; created_at: string; updated_at: string; categories?: { name: string } | null };
+export type VideoRecord = { id: string; title: string; video_url: string; description: string; thumbnail_url: string | null; category_id: string; tags: string[]; duration: string; views: number; display_view_count: number; display_views?: number; published_at: string | null; featured: boolean; published: boolean; created_at: string; updated_at: string; categories?: { name: string } | null };
 export type LibraryStats = { total_videos: number; published_videos: number; total_categories: number; total_views: number };
 export type VideoSort = "latest" | "oldest" | "most-watched" | "least-watched" | "a-z" | "z-a" | "random" | "most-liked" | "highest-rated" | "lowest-rated";
 const PAGE_SIZE = 20;
@@ -206,11 +206,11 @@ export function useVideos(options: { categoryId?: string; search?: string; searc
   }, [admin, categoryId, search, searchCategoryIds, published, sort, pageNumber, pageSize, dailyFeed]);
   useEffect(() => { if (enabled) void fetchPage(pageNumber === undefined ? 0 : Math.max(1, pageNumber) - 1); }, [enabled, fetchPage, pageNumber]);
   const refresh = useCallback(() => fetchPage(pageNumber === undefined ? 0 : Math.max(1, pageNumber) - 1), [fetchPage, pageNumber]);
-  async function create(input: Omit<VideoRecord, "id" | "created_at" | "updated_at" | "views" | "categories">): Promise<VideoRecord | null> {
+  async function create(input: Omit<VideoRecord, "id" | "created_at" | "updated_at" | "views" | "display_view_count" | "published_at" | "display_views" | "categories">): Promise<VideoRecord | null> {
     try { const { data, error } = await createClient().from("videos").insert(input).select("*, categories(name)").single(); if (error) throw error; const video = data as VideoRecord; setVideos((old) => [video, ...old]); return video; }
     catch { toast.error("Could not add video. Check the URL and category."); return null; }
   }
-  async function update(id: string, input: Partial<Omit<VideoRecord, "id" | "created_at" | "updated_at" | "categories">>) {
+  async function update(id: string, input: Partial<Omit<VideoRecord, "id" | "created_at" | "updated_at" | "views" | "display_view_count" | "published_at" | "display_views" | "categories">>) {
     try { const { data, error } = await createClient().from("videos").update({ ...input, updated_at: new Date().toISOString() }).eq("id", id).select("*, categories(name)").single(); if (error) throw error; setVideos((old) => old.map((item) => item.id === id ? data as VideoRecord : item)); toast.success("Video updated."); return true; }
     catch { toast.error("Could not update video."); return false; }
   }

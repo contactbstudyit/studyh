@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { buildDailyVideoFeed, dailyOrder } from "@/lib/daily-video-feed";
+import { getPublicDisplayViews } from "@/lib/public-view-count-server";
 
 export const dynamic = "force-dynamic";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -15,6 +16,9 @@ type FeedVideo = {
   tags: string[];
   duration: string;
   views: number;
+  display_view_count: number;
+  display_views?: number;
+  published_at: string | null;
   featured: boolean;
   published: boolean;
   created_at: string;
@@ -59,7 +63,7 @@ export async function GET(request: NextRequest) {
 
     const rows: FeedVideo[] = [];
     for (let offset = 0; ; offset += FETCH_CHUNK) {
-      let query = supabase.from("videos").select("id,title,description,thumbnail_url,category_id,tags,duration,views,featured,published,created_at,updated_at,categories(name)").eq("published", true);
+      let query = supabase.from("videos").select("id,title,description,thumbnail_url,category_id,tags,duration,views,display_view_count,published_at,featured,published,created_at,updated_at,categories(name)").eq("published", true);
       if (categoryId) query = query.eq("category_id", categoryId);
       if (excludeId) query = query.neq("id", excludeId);
       if (search) {
@@ -81,7 +85,10 @@ export async function GET(request: NextRequest) {
     const feed = sortFeed(rows, sort, today, categoryId);
     const offset = (page - 1) * pageSize;
     const response = {
-      videos: feed.slice(offset, offset + pageSize),
+      videos: feed.slice(offset, offset + pageSize).map((video) => {
+        const { views: _realViews, display_view_count: _displayBase, published_at: _publishedAt, ...publicVideo } = video;
+        return { ...publicVideo, display_views: getPublicDisplayViews(video) };
+      }),
       totalCount: feed.length,
       page,
       pageSize,

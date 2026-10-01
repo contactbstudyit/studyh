@@ -2,17 +2,19 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Command, Film } from "lucide-react";
+import { recordPublicVideoView } from "@/hooks/use-library";
 import type { VideoRecord } from "@/hooks/use-library";
 import { getPlaybackFailureReason, probeVideoSource, supportsNativeHls } from "@/lib/video-playback";
 import type { SourceProbe, VideoSourceType } from "@/lib/video-playback";
 
-type WatchVideo = Omit<VideoRecord, "video_url">;
+type WatchVideo = Omit<VideoRecord, "video_url" | "views" | "display_view_count" | "published_at">;
 
-export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost }: {
+export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onViewCounted }: {
   video: WatchVideo;
   playbackUrl: string;
   playbackType: VideoSourceType;
   sourceHost: string;
+  onViewCounted?: () => void;
 }) {
   const [failure, setFailure] = useState("");
   const [loading, setLoading] = useState(true);
@@ -25,6 +27,7 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost }: {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<import("hls.js").default | null>(null);
   const playbackReportedRef = useRef(false);
+  const viewedVideoIdRef = useRef<string | null>(null);
   const hlsManagedRef = useRef(false);
 
   useEffect(() => {
@@ -121,7 +124,14 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost }: {
     if (process.env.NODE_ENV === "development") console.error("[video-playback] relay media error", { sourceHost, sourceType, mediaErrorCode, mediaErrorMessage: event.currentTarget.error?.message, reason });
   }
 
-  function handlePlaybackStarted() { setLoading(false); if (!playbackReportedRef.current && process.env.NODE_ENV === "development") { playbackReportedRef.current = true; console.info("[video-playback] playback confirmed", { source: sourceHost, format: sourceType.toUpperCase(), relay: "same-origin" }); } }
+  function handlePlaybackStarted() {
+    setLoading(false);
+    if (!playbackReportedRef.current && process.env.NODE_ENV === "development") { playbackReportedRef.current = true; console.info("[video-playback] playback confirmed", { source: sourceHost, format: sourceType.toUpperCase(), relay: "same-origin" }); }
+    if (viewedVideoIdRef.current !== video.id) {
+      viewedVideoIdRef.current = video.id;
+      void recordPublicVideoView(video.id).then((counted) => { if (counted) onViewCounted?.(); });
+    }
+  }
   const diagnosticLines = [`Source: ${sourceHost}`, `Format: ${sourceType.toUpperCase()}`, diagnostics.hlsStatus !== null ? `HTTP status: ${diagnostics.hlsStatus}` : null, diagnostics.hlsDetails ? `Player detail: ${diagnostics.hlsDetails}` : null];
   return <div className="player-frame" data-source-type={sourceType}><video ref={videoRef} controls autoPlay playsInline preload="metadata" poster={video.thumbnail_url || undefined} onLoadedMetadata={() => setLoading(false)} onCanPlay={() => setLoading(false)} onPlaying={handlePlaybackStarted} onWaiting={() => setLoading(true)} onError={handleMediaError}/>{loading && !failure && <div className="player-loading"><span className="spinner"/><span>Loading video...</span></div>}{failure && <div className="player-error"><Film size={24}/><strong>Unable to play this video</strong><span className="player-reason">{failure}</span><span className="player-diagnostics">{diagnosticLines.join(" · ")}</span><button type="button" onClick={() => { setFailure(""); setAttempt((current) => current + 1); }}>Try again</button></div>}<span className="player-hint"><Command size={12}/> SPACE TO PLAY</span></div>;
 }

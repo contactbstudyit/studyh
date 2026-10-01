@@ -1,21 +1,23 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { ArrowLeft, ArrowRight, Command, Film, Play, Search } from "lucide-react";
+import { ArrowLeft, ArrowRight, Command, Film, Info, Play, Search } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useRecommendedVideos, recordPublicVideoView } from "@/hooks/use-library";
+import { useRecommendedVideos } from "@/hooks/use-library";
 import type { VideoRecord } from "@/hooks/use-library";
 import { VideoPlayer } from "@/components/video-player";
 import styles from "@/components/watch-page.module.css";
 import type { VideoSourceType } from "@/lib/video-playback";
+import { formatPublicViewCount } from "@/lib/public-view-count";
+import PublicViewCount from "@/components/public-view-count";
 
-type WatchVideo = Omit<VideoRecord, "video_url">;
+type WatchVideo = Omit<VideoRecord, "video_url" | "views" | "display_view_count" | "published_at">;
 
-export default function WatchPage({ video, playbackUrl, playbackType, sourceHost }: { video: WatchVideo; playbackUrl: string; playbackType: VideoSourceType; sourceHost: string }) {
+export default function WatchPage({ video, playbackUrl, playbackType, sourceHost, displayViews }: { video: WatchVideo; playbackUrl: string; playbackType: VideoSourceType; sourceHost: string; displayViews: number }) {
   const router = useRouter();
   const [search, setSearch] = useState("");
-  const [viewCount, setViewCount] = useState(video.views);
+  const [viewCount, setViewCount] = useState(displayViews);
   const [mobileLayout, setMobileLayout] = useState(false);
   const recommended = useRecommendedVideos(video);
 
@@ -27,10 +29,7 @@ export default function WatchPage({ video, playbackUrl, playbackType, sourceHost
     return () => breakpoint.removeEventListener("change", update);
   }, []);
 
-  useEffect(() => {
-    setViewCount(video.views);
-    void recordPublicVideoView(video.id).then((counted) => { if (counted) setViewCount((current) => current + 1); });
-  }, [video.id, video.views]);
+  useEffect(() => { setViewCount(displayViews); }, [video.id, displayViews]);
 
   function submitSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -48,9 +47,9 @@ export default function WatchPage({ video, playbackUrl, playbackType, sourceHost
 
     <div className="watch-page-content">
       <section className="watch-page-current" aria-label="Now playing">
-        <VideoPlayer video={video} playbackUrl={playbackUrl} playbackType={playbackType} sourceHost={sourceHost}/>
+        <VideoPlayer video={video} playbackUrl={playbackUrl} playbackType={playbackType} sourceHost={sourceHost} onViewCounted={() => setViewCount((current) => current + 1)}/>
         <div className="watch-page-details">
-          <div className="watch-page-title"><h1>{video.title}</h1><span>{viewCount.toLocaleString()} views</span></div>
+          <div className="watch-page-title"><h1>{video.title}</h1><span className="public-view-count" title="Displayed count includes a promotional starting component; real views are tracked separately."><span>{formatPublicViewCount(viewCount)} views</span><Info size={13} role="img" aria-label="Includes a promotional starting count"/></span></div>
           {video.description && <p>{video.description}</p>}
         </div>
       </section>
@@ -58,7 +57,7 @@ export default function WatchPage({ video, playbackUrl, playbackType, sourceHost
       <section className="recommended-section" aria-labelledby="recommended-heading">
         <div className="recommended-heading"><div><h2 id="recommended-heading">Recommended</h2><span>More to watch</span></div></div>
         {recommended.loading && recommended.videos.length === 0 && <div className={`video-grid skeleton-grid ${styles.recommendedGrid}`} style={mobileLayout ? { gridTemplateColumns: "minmax(0,1fr)" } : undefined} role="status" aria-label="Loading recommended videos">{Array.from({ length: 5 }, (_, index) => <article className="video-card skeleton-card" key={index}><div className="skeleton-thumbnail"/><div className="skeleton-title"><span/><span/></div></article>)}</div>}
-        {recommended.videos.length > 0 && <div className={`video-grid ${styles.recommendedGrid}`} style={mobileLayout ? { gridTemplateColumns: "minmax(0,1fr)" } : undefined}>{recommended.videos.map((item) => <article className="video-card" key={item.id}><Link className="thumbnail-button" href={`/watch/${item.id}`} aria-label={`Watch ${item.title}`}><img loading="lazy" src={item.thumbnail_url || "/film-placeholder.svg"} alt=""/><span className="thumb-shade"/><span className="play-disc"><Play size={17} fill="currentColor"/></span></Link><Link className="card-title" href={`/watch/${item.id}`}>{item.title}</Link>{item.duration && <span className="watch-card-duration">{item.duration}</span>}{item.description && <p className="card-description">{item.description}</p>}</article>)}</div>}
+        {recommended.videos.length > 0 && <div className={`video-grid ${styles.recommendedGrid}`} style={mobileLayout ? { gridTemplateColumns: "minmax(0,1fr)" } : undefined}>{recommended.videos.map((item) => <article className="video-card" key={item.id}><Link className="thumbnail-button" href={`/watch/${item.id}`} aria-label={`Watch ${item.title}`}><img loading="lazy" src={item.thumbnail_url || "/film-placeholder.svg"} alt=""/><span className="thumb-shade"/><span className="play-disc"><Play size={17} fill="currentColor"/></span></Link><Link className="card-title" href={`/watch/${item.id}`}>{item.title}</Link><PublicViewCount count={item.display_views ?? 0} className="card-view-count"/>{item.duration && <span className="watch-card-duration">{item.duration}</span>}{item.description && <p className="card-description">{item.description}</p>}</article>)}</div>}
         {!recommended.loading && recommended.videos.length === 0 && <div className="recommended-empty"><Film size={18}/><span>No recommended videos yet.</span></div>}
         {recommended.hasMore && <div className="recommended-more"><button className="button-secondary" onClick={recommended.loadMore} disabled={recommended.loadingMore}>{recommended.loadingMore ? "Loading..." : "Load More"}<ArrowRight size={14}/></button></div>}
       </section>

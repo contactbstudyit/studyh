@@ -12,25 +12,48 @@ export default function AdminLogin() {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError(""); setBusy(true);
     const form = new FormData(event.currentTarget);
-    let stage: "auth" | "membership" = "auth";
+    let stage: "client" | "sign-in" | "get-user" | "membership" = "client";
+    const projectHost = (() => { try { return new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").host; } catch { return "invalid Supabase URL"; } })();
     try {
       const client = createClient();
       const email = String(form.get("email"));
+      stage = "sign-in";
       const { error: loginError } = await client.auth.signInWithPassword({ email, password: String(form.get("password")) });
       if (loginError) throw loginError;
+      stage = "get-user";
+      const { data: userData, error: userError } = await client.auth.getUser();
+      if (userError) throw userError;
+      const user = userData.user;
+      if (!user?.id) throw new Error("Supabase Auth returned no authenticated user after sign-in.");
       stage = "membership";
-      const { data: userData } = await client.auth.getUser();
-      const { data: membership, error: memberError } = await client.from("admins").select("user_id").eq("user_id", userData.user?.id ?? "").maybeSingle();
-      if (memberError) throw memberError;
-      if (!membership) { await client.auth.signOut(); throw new Error("This account is not authorized for the admin area."); }
+      const { data: membership, error: memberError } = await client.from("admins").select("user_id").eq("user_id", user.id).maybeSingle();
+      if (memberError) {
+        const diagnostic = { projectHost, userId: user.id, table: "public.admins", query: "select user_id where user_id = authenticated user UUID", message: memberError.message, code: memberError.code, details: memberError.details, hint: memberError.hint };
+        if (process.env.NODE_ENV === "development") console.error("[admin-auth] membership query failed", diagnostic);
+        const info = process.env.NODE_ENV === "development" ? ` ${JSON.stringify({ message: memberError.message, code: memberError.code, details: memberError.details, hint: memberError.hint, userId: user.id, projectHost })}` : ` (${memberError.code || "membership_error"}: ${memberError.message})`;
+        await client.auth.signOut();
+        setError(`Could not verify admin membership.${info}`);
+        return;
+      }
+      if (!membership) {
+        const diagnostic = { projectHost, userId: user.id, query: "public.admins.select(user_id).eq(user_id, user.id).maybeSingle()", result: null, error: null };
+        if (process.env.NODE_ENV === "development") console.warn("[admin-auth] no admins membership row", diagnostic);
+        await client.auth.signOut();
+        setError(process.env.NODE_ENV === "development" ? `No admin membership row returned. ${JSON.stringify(diagnostic)}` : "This authenticated account is not authorized for the admin area.");
+        return;
+      }
       router.replace("/admin"); router.refresh();
     } catch (cause) {
-      const message = cause && typeof cause === "object" && "message" in cause && typeof cause.message === "string" ? cause.message : "";
+      const supabaseError = cause && typeof cause === "object" ? cause as { message?: unknown; code?: unknown; details?: unknown; hint?: unknown } : null;
+      const message = typeof supabaseError?.message === "string" ? supabaseError.message : String(cause);
       const normalized = message.toLowerCase();
-      if (message === "This account is not authorized for the admin area.") setError(message);
-      else if (stage === "auth" && (normalized.includes("invalid login") || normalized.includes("invalid_credentials"))) setError("Email or password is incorrect, or this email has not been created as a Supabase Auth user yet.");
-      else if (stage === "auth") setError("Could not reach Supabase Auth. Check the Supabase URL/key and confirm this account exists.");
-      else setError("Signed in, but admin access could not be checked. Apply the database migrations and add this Auth user to public.admins.");
+      const diagnostic = { stage, projectHost, message, code: supabaseError?.code, details: supabaseError?.details, hint: supabaseError?.hint };
+      if (process.env.NODE_ENV === "development") console.error("[admin-auth] sign-in flow failed", diagnostic);
+      if (stage === "sign-in" && (normalized.includes("invalid login") || normalized.includes("invalid_credentials"))) setError("Email or password is incorrect.");
+      else if (stage === "sign-in") setError(`Supabase Auth sign-in failed: ${message}`);
+      else if (stage === "get-user") setError(`Sign-in succeeded, but Supabase could not verify the user: ${message}`);
+      else if (stage === "membership") setError(`Admin membership check failed: ${message}${process.env.NODE_ENV === "development" ? ` ${JSON.stringify(diagnostic)}` : ""}`);
+      else setError(`Supabase client setup failed: ${message}`);
     }
     finally { setBusy(false); }
   }

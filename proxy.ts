@@ -30,8 +30,29 @@ export async function proxy(request: NextRequest) {
       target.searchParams.set('next', path)
       return NextResponse.redirect(target)
     }
-    const { data: membership } = await supabase.from('admins').select('user_id').eq('user_id', userId).maybeSingle()
+    const { data: membership, error } = await supabase.from('admins').select('user_id').eq('user_id', userId).maybeSingle()
+    if (error) {
+      if (process.env.NODE_ENV === 'development') console.error('[admin-auth] proxy membership query failed', {
+        projectHost: new URL(url).host,
+        userId,
+        table: 'public.admins',
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
+      })
+      const target = request.nextUrl.clone()
+      target.pathname = '/admin/login'
+      target.searchParams.set('membershipCheck', 'failed')
+      return NextResponse.redirect(target)
+    }
     if (!membership) {
+      if (process.env.NODE_ENV === 'development') console.warn('[admin-auth] proxy membership query returned no row', {
+        projectHost: new URL(url).host,
+        userId,
+        table: 'public.admins',
+        result: membership,
+      })
       const target = request.nextUrl.clone()
       target.pathname = '/'
       target.search = ''

@@ -1,11 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Clock3, Command, Menu, Play, Search, Settings2, X } from "lucide-react";
+import { Clock3, Command, Menu, Play, Search, Settings2 } from "lucide-react";
 import Link from "next/link";
-import { Category, useCategories, useVideos, VideoRecord } from "@/hooks/use-library";
+import { Category, useCategories, useVideos } from "@/hooks/use-library";
 import { getCategorySlug, slugifyCategory } from "@/lib/category-slug";
-import { VideoPlayer } from "@/components/video-player";
 import VideoPagination from "@/components/video-pagination";
 
 const PUBLIC_PAGE_SIZE = 15;
@@ -16,7 +15,6 @@ export default function Home() {
   const [page, setPage] = useState(1);
   const [urlReady, setUrlReady] = useState(false);
   const urlInitialized = useRef(false);
-  const [selected, setSelected] = useState<VideoRecord | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const categoriesHook = useCategories();
   const defaultCategory = categoriesHook.categories.find((category) => slugifyCategory(category.name) === "edu");
@@ -36,8 +34,6 @@ export default function Home() {
   const searchCategoryIds = useMemo(() => categoriesHook.categories.filter((category) => category.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())).map((category) => category.id), [categoriesHook.categories, query]);
   const videosHook = useVideos({ categoryId: activeCategory || undefined, search: query, searchCategoryIds, enabled: urlReady, pageNumber: page, pageSize: PUBLIC_PAGE_SIZE });
   const categories = useMemo(() => categoriesHook.categories, [categoriesHook.categories]);
-
-  useEffect(() => { if (selected) void videosHook.recordView(selected.id); }, [selected?.id]);
 
   useEffect(() => {
     if (!urlReady) return;
@@ -86,11 +82,10 @@ export default function Home() {
     <section className="collection section-wrap" id="top">
       <div className="section-header"><h1>{categories.find((category) => category.id === activeCategory)?.name ?? "Latest Videos"}</h1><span className="result-count">{videosHook.totalCount ?? 0} {(videosHook.totalCount ?? 0) === 1 ? "video" : "videos"}</span></div>
       <div className="category-strip" id="categories"><div className="category-label">Categories</div><div className="category-chips"><button className={`category-chip ${activeCategory === "" ? "selected" : ""}`} onClick={() => chooseCategory("")}>All</button>{categories.map((category) => <CategoryPill key={category.id} category={category} selected={activeCategory === category.id} onClick={() => chooseCategory(category.id)}/>)}</div></div>
-      {!urlReady || videosHook.loading && videosHook.videos.length === 0 ? <div className="video-grid skeleton-grid" role="status" aria-label="Loading videos">{Array.from({ length: 6 }, (_, index) => <article className="video-card skeleton-card" key={index}><div className="skeleton-thumbnail"/><div className="skeleton-title"><span/><span/></div></article>)}</div> : <div className="video-grid">{videosHook.videos.map((video) => <article className="video-card" key={video.id}><button className="thumbnail-button" onClick={() => setSelected(video)} aria-label={`Watch ${video.title}`}><img loading="lazy" src={video.thumbnail_url || "/film-placeholder.svg"} alt=""/><span className="thumb-shade"/><span className="play-disc"><Play size={17} fill="currentColor"/></span>{video.duration && <span className="duration"><Clock3 size={11}/>{video.duration}</span>}</button><button className="card-title" onClick={() => setSelected(video)}>{video.title}</button>{video.description && <p className="card-description">{video.description}</p>}</article>)}</div>}
+      {!urlReady || videosHook.loading && videosHook.videos.length === 0 ? <div className="video-grid skeleton-grid" role="status" aria-label="Loading videos">{Array.from({ length: 6 }, (_, index) => <article className="video-card skeleton-card" key={index}><div className="skeleton-thumbnail"/><div className="skeleton-title"><span/><span/></div></article>)}</div> : <div className="video-grid">{videosHook.videos.map((video) => <article className="video-card" key={video.id}><Link className="thumbnail-button" href={`/watch/${video.id}`} aria-label={`Watch ${video.title}`}><img loading="lazy" src={video.thumbnail_url || "/film-placeholder.svg"} alt=""/><span className="thumb-shade"/><span className="play-disc"><Play size={17} fill="currentColor"/></span>{video.duration && <span className="duration"><Clock3 size={11}/>{video.duration}</span>}</Link><Link className="card-title" href={`/watch/${video.id}`}>{video.title}</Link>{video.description && <p className="card-description">{video.description}</p>}</article>)}</div>}
       {!videosHook.loading && videosHook.totalCount === 0 && <div className="empty-state"><Search size={22}/><strong>No videos found</strong><span>Try a different search or category.</span></div>}
       <VideoPagination page={page} totalPages={totalPages} loading={videosHook.loading} onPageChange={changePage}/>
     </section>
-    {selected && <div className="modal-backdrop" role="presentation" onClick={() => setSelected(null)}><section className="watch-modal" role="dialog" aria-modal="true" aria-label={selected.title} onClick={(event) => event.stopPropagation()}><div className="watch-top"><span><span className="live-dot"/> NOW PLAYING</span><button className="icon-button" onClick={() => setSelected(null)} aria-label="Close player"><X size={19}/></button></div><VideoPlayer video={selected}/><div className="watch-info"><div><span className="eyebrow">{selected.categories?.name ?? categories.find((category) => category.id === selected.category_id)?.name} · {selected.views.toLocaleString()} views</span><h2>{selected.title}</h2><p>{selected.description}</p></div></div><div className="source-note"><Check size={13}/> Streaming directly from its source. Nothing is stored here.</div></section></div>}
   </main>;
 }
 

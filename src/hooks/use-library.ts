@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 
@@ -10,6 +10,18 @@ export type VideoRecord = { id: string; title: string; video_url: string; descri
 export type LibraryStats = { total_videos: number; published_videos: number; total_categories: number; total_views: number };
 export type VideoSort = "latest" | "oldest" | "most-watched" | "least-watched" | "a-z" | "z-a" | "random" | "most-liked" | "highest-rated" | "lowest-rated";
 const PAGE_SIZE = 20;
+
+export async function recordPublicVideoView(id: string) {
+  try {
+    const cookieName = "video_viewer_key";
+    const cookie = document.cookie.match(new RegExp(`(?:^|; )${cookieName}=([^;]*)`));
+    const viewerKey = cookie?.[1] || crypto.randomUUID();
+    if (!cookie) document.cookie = `${cookieName}=${viewerKey}; Max-Age=31536000; Path=/; SameSite=Lax`;
+    const { data, error } = await createClient().rpc("record_video_view", { p_video_id: id, p_viewer_key: viewerKey });
+    if (error) throw error;
+    return Boolean(data);
+  } catch { return false; }
+}
 
 export function useCategories() {
   const [categories, setCategories] = useState<Category[]>([]);
@@ -215,16 +227,85 @@ export function useVideos(options: { categoryId?: string; search?: string; searc
     }
   }
   async function recordView(id: string) {
-    try {
-      const keyName = "video_viewer_key";
-      const match = document.cookie.match(new RegExp(`(?:^|; )${keyName}=([^;]*)`));
-      const viewerKey = match?.[1] || crypto.randomUUID();
-      if (!match) document.cookie = `${keyName}=${viewerKey}; Max-Age=31536000; Path=/; SameSite=Lax`;
-      const { data, error } = await createClient().rpc("record_video_view", { p_video_id: id, p_viewer_key: viewerKey });
-      if (error) throw error;
-      if (data) setVideos((old) => old.map((video) => video.id === id ? { ...video, views: video.views + 1 } : video));
-    } catch { /* View metrics are best-effort and never interrupt playback. */ }
+    const counted = await recordPublicVideoView(id);
+    if (counted) setVideos((old) => old.map((video) => video.id === id ? { ...video, views: video.views + 1 } : video));
   }
   const loadMore = () => { if (hasMore && !loading) void fetchPage(page + 1, true); };
   return { videos, loading, hasMore, page, totalCount, refresh, loadMore, create, update, remove, getMissingThumbnails, recordView };
+}
+
+export function useRecommendedVideos(currentVideo: VideoRecord) {
+  const [videos, setVideos] = useState<VideoRecord[]>([]);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [error, setError] = useState("");
+  const offsets = useRef({ same: 0, sameCount: null as number | null, other: 0, otherCount: null as number | null });
+  const requestLock = useRef(false);
+  const requestGeneration = useRef(0);
+
+  const loadNext = useCallback(async (reset = false) => {
+    if (reset) { requestGeneration.current++; requestLock.current = false; }
+    if (requestLock.current) return;
+    const generation = requestGeneration.current;
+    requestLock.current = true;
+    if (reset) setInitialLoading(true); else setLoadingMore(true);
+    setError("");
+    try {
+      const client = createClient();
+      const batch: VideoRecord[] = [];
+      if (offsets.current.sameCount === null || offsets.current.same < offsets.current.sameCount) {
+        const { data, count, error: queryError } = await client.from("videos").select("*, categories(name)", { count: "exact" }).eq("published", true).eq("category_id", currentVideo.category_id).neq("id", currentVideo.id).order("created_at", { ascending: false }).range(offsets.current.same, offsets.current.same + 4);
+        if (generation !== requestGeneration.current) return;
+        if (queryError) throw queryError;
+        const rows = (data ?? []) as VideoRecord[];
+        offsets.current.sameCount = count ?? 0;
+        offsets.current.same += rows.length;
+        batch.push(...rows);
+      }
+
+      const sameRemaining = Math.max(0, (offsets.current.sameCount ?? 0) - offsets.current.same);
+      if (batch.length < 5 && sameRemaining === 0) {
+        if (offsets.current.otherCount === null || offsets.current.other < offsets.current.otherCount) {
+          const needed = 5 - batch.length;
+          const { data, count, error: queryError } = await client.from("videos").select("*, categories(name)", { count: "exact" }).eq("published", true).neq("category_id", currentVideo.category_id).neq("id", currentVideo.id).order("created_at", { ascending: false }).range(offsets.current.other, offsets.current.other + needed - 1);
+          if (generation !== requestGeneration.current) return;
+          if (queryError) throw queryError;
+          const rows = (data ?? []) as VideoRecord[];
+          offsets.current.otherCount = count ?? 0;
+          offsets.current.other += rows.length;
+          batch.push(...rows);
+        }
+      }
+
+      if ((offsets.current.sameCount ?? 0) - offsets.current.same <= 0 && offsets.current.otherCount === null) {
+        const { count, error: countError } = await client.from("videos").select("id", { count: "exact", head: true }).eq("published", true).neq("category_id", currentVideo.category_id).neq("id", currentVideo.id);
+        if (generation !== requestGeneration.current) return;
+        if (countError) throw countError;
+        offsets.current.otherCount = count ?? 0;
+      }
+      setVideos((old) => reset ? batch : [...old, ...batch]);
+      setHasMore(offsets.current.same < (offsets.current.sameCount ?? 0) || offsets.current.other < (offsets.current.otherCount ?? 0));
+    } catch (cause) {
+      if (generation !== requestGeneration.current) return;
+      const detail = cause && typeof cause === "object" && "message" in cause ? String(cause.message) : String(cause);
+      setError(detail);
+      if (process.env.NODE_ENV === "development") console.error("[video-recommendations] load failed", { currentVideoId: currentVideo.id, categoryId: currentVideo.category_id, message: detail });
+      toast.error(`Could not load recommended videos: ${detail}`);
+    } finally {
+      if (generation === requestGeneration.current) {
+        requestLock.current = false;
+        setInitialLoading(false);
+        setLoadingMore(false);
+      }
+    }
+  }, [currentVideo.category_id, currentVideo.id]);
+
+  useEffect(() => {
+    offsets.current = { same: 0, sameCount: null, other: 0, otherCount: null };
+    setVideos([]); setHasMore(false); setError(""); setInitialLoading(true);
+    void loadNext(true);
+  }, [loadNext]);
+
+  return { videos, loading: initialLoading, loadingMore, hasMore, error, loadMore: () => void loadNext(false) };
 }

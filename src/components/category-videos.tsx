@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Clock3, Command, Filter, Play, Search, X } from "lucide-react";
+import { Check, Clock3, Command, Filter, Play, Search } from "lucide-react";
+import Link from "next/link";
 import { useVideos } from "@/hooks/use-library";
-import type { VideoSort, VideoRecord } from "@/hooks/use-library";
+import type { VideoSort } from "@/hooks/use-library";
 import type { PublicCategory } from "@/lib/category-routes";
-import { VideoPlayer } from "@/components/video-player";
 import VideoPagination from "@/components/video-pagination";
 
 const PUBLIC_PAGE_SIZE = 15;
@@ -39,14 +39,12 @@ export default function CategoryVideos({ category, initialSort = "latest", initi
   const [page, setPage] = useState(initialPage);
   const [randomSeed, setRandomSeed] = useState(1);
   const [filterOpen, setFilterOpen] = useState(false);
-  const [selected, setSelected] = useState<VideoRecord | null>(null);
   const filterRef = useRef<HTMLDivElement>(null);
   const videosHook = useVideos({ categoryId: category.id, search: query, admin: false, sort, pageNumber: page, pageSize: PUBLIC_PAGE_SIZE });
   const displayedVideos = useMemo(() => sort === "random"
     ? [...videosHook.videos].sort((left, right) => randomOrderKey(left.id, randomSeed) - randomOrderKey(right.id, randomSeed))
     : videosHook.videos, [videosHook.videos, sort, randomSeed]);
 
-  useEffect(() => { if (selected) void videosHook.recordView(selected.id); }, [selected?.id]);
   useEffect(() => {
     const handlePopState = () => {
       const params = new URLSearchParams(window.location.search);
@@ -114,10 +112,9 @@ export default function CategoryVideos({ category, initialSort = "latest", initi
       </div>
     </header>
     <section className="collection section-wrap" id="top">
-      {videosHook.loading && videosHook.videos.length === 0 ? <div className="video-grid skeleton-grid" role="status" aria-label={`Loading ${category.name} videos`}>{Array.from({ length: 6 }, (_, index) => <article className="video-card skeleton-card" key={index}><div className="skeleton-thumbnail"/><div className="skeleton-title"><span/><span/></div></article>)}</div> : <div className="video-grid">{displayedVideos.map((video) => <article className="video-card" key={video.id}><button className="thumbnail-button" onClick={() => setSelected(video)} aria-label={`Watch ${video.title}`}><img loading="lazy" src={video.thumbnail_url || "/film-placeholder.svg"} alt=""/><span className="thumb-shade"/><span className="play-disc"><Play size={17} fill="currentColor"/></span>{video.duration && <span className="duration"><Clock3 size={11}/>{video.duration}</span>}</button><button className="card-title" onClick={() => setSelected(video)}>{video.title}</button>{video.description && <p className="card-description">{video.description}</p>}</article>)}</div>}
+      {videosHook.loading && videosHook.videos.length === 0 ? <div className="video-grid skeleton-grid" role="status" aria-label={`Loading ${category.name} videos`}>{Array.from({ length: 6 }, (_, index) => <article className="video-card skeleton-card" key={index}><div className="skeleton-thumbnail"/><div className="skeleton-title"><span/><span/></div></article>)}</div> : <div className="video-grid">{displayedVideos.map((video) => <article className="video-card" key={video.id}><Link className="thumbnail-button" href={`/watch/${video.id}`} aria-label={`Watch ${video.title}`}><img loading="lazy" src={video.thumbnail_url || "/film-placeholder.svg"} alt=""/><span className="thumb-shade"/><span className="play-disc"><Play size={17} fill="currentColor"/></span>{video.duration && <span className="duration"><Clock3 size={11}/>{video.duration}</span>}</Link><Link className="card-title" href={`/watch/${video.id}`}>{video.title}</Link>{video.description && <p className="card-description">{video.description}</p>}</article>)}</div>}
       {!videosHook.loading && videosHook.totalCount === 0 && <div className="empty-state"><Search size={22}/><strong>No videos in {category.name} yet</strong><span>Check back later for new videos.</span></div>}
       <VideoPagination page={page} totalPages={totalPages} loading={videosHook.loading} onPageChange={changePage}/>
     </section>
-    {selected && <div className="modal-backdrop" role="presentation" onClick={() => setSelected(null)}><section className="watch-modal" role="dialog" aria-modal="true" aria-label={selected.title} onClick={(event) => event.stopPropagation()}><div className="watch-top"><span><span className="live-dot"/> NOW PLAYING</span><button className="icon-button" onClick={() => setSelected(null)} aria-label="Close player"><X size={19}/></button></div><VideoPlayer video={selected}/><div className="watch-info"><div><span className="eyebrow">{selected.categories?.name ?? category.name} · {selected.views.toLocaleString()} views</span><h2>{selected.title}</h2><p>{selected.description}</p></div></div><div className="source-note"><Check size={13}/> Streaming directly from its source. Nothing is stored here.</div></section></div>}
   </main>;
 }

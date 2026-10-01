@@ -1,28 +1,46 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
+import { createServerClient } from '@supabase/ssr'
 
-export function proxy(request: NextRequest) {
-  // Skip middleware for API routes, static files, and Next.js internals
-  if (
-    request.nextUrl.pathname.startsWith('/api/') ||
-    request.nextUrl.pathname.startsWith('/_next/') ||
-    request.nextUrl.pathname.includes('.')
-  ) {
-    return NextResponse.next()
+export async function proxy(request: NextRequest) {
+  let response = NextResponse.next({ request })
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  if (!url || !key) return response
+  const supabase = createServerClient(url, key, {
+    cookies: {
+      getAll: () => request.cookies.getAll(),
+      setAll(cookiesToSet, headers) {
+        cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
+        response = NextResponse.next({ request })
+        cookiesToSet.forEach(({ name, value, options }) => response.cookies.set(name, value, options))
+        Object.entries(headers).forEach(([name, value]) => response.headers.set(name, value))
+      },
+    },
+  })
+
+  const { data: verified } = await supabase.auth.getClaims()
+  const claims = verified?.claims
+  const path = request.nextUrl.pathname
+  if (path.startsWith('/admin') && path !== '/admin/login') {
+    const userId = claims?.sub
+    if (!userId) {
+      const target = request.nextUrl.clone()
+      target.pathname = '/admin/login'
+      target.searchParams.set('next', path)
+      return NextResponse.redirect(target)
+    }
+    const { data: membership } = await supabase.from('admins').select('user_id').eq('user_id', userId).maybeSingle()
+    if (!membership) {
+      const target = request.nextUrl.clone()
+      target.pathname = '/'
+      target.search = ''
+      return NextResponse.redirect(target)
+    }
   }
-
-  return NextResponse.next()
+  return response
 }
 
 export const config = {
-  matcher: [
-    /*
-     * Match all request paths except for the ones starting with:
-     * - api (API routes)
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     */
-    '/((?!api|_next/static|_next/image|favicon.ico).*)',
-  ],
+  matcher: ['/', '/admin/:path*'],
 }

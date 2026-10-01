@@ -8,19 +8,43 @@ import { ShieldCheck } from "lucide-react";
 export default function AdminLogin() {
   const router = useRouter();
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [signup, setSignup] = useState(false);
   async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setError(""); setBusy(true);
+    event.preventDefault(); setError(""); setNotice(""); setBusy(true);
     const form = new FormData(event.currentTarget);
     try {
-      const { error: loginError } = await createClient().auth.signInWithPassword({ email: String(form.get("email")), password: String(form.get("password")) });
+      const client = createClient();
+      const email = String(form.get("email"));
+      if (form.get("mode") === "signup") {
+        const password = String(form.get("password"));
+        if (password.length < 12) throw new Error("Use a password with at least 12 characters.");
+        if (password !== String(form.get("confirm_password"))) throw new Error("The passwords do not match.");
+        const { data, error: signupError } = await client.auth.signUp({ email, password, options: { emailRedirectTo: `${window.location.origin}/admin/login` } });
+        if (signupError) throw signupError;
+        if (data.session) {
+          const { data: bootstrapped, error: bootstrapError } = await client.rpc("bootstrap_first_admin");
+          if (bootstrapError) throw bootstrapError;
+          if (bootstrapped) { router.replace("/admin"); router.refresh(); return; }
+          await client.auth.signOut();
+        }
+        setNotice("Account created. Confirm your email, then sign in. Only the configured first-admin email can access the dashboard.");
+        return;
+      }
+      const { error: loginError } = await client.auth.signInWithPassword({ email, password: String(form.get("password")) });
       if (loginError) throw loginError;
-      const { data: userData } = await createClient().auth.getUser();
-      const { data: membership, error: memberError } = await createClient().from("admins").select("user_id").eq("user_id", userData.user?.id ?? "").maybeSingle();
-      if (memberError || !membership) { await createClient().auth.signOut(); throw new Error("This account is not authorized for the admin area."); }
+      const { data: userData } = await client.auth.getUser();
+      const { data: membership, error: memberError } = await client.from("admins").select("user_id").eq("user_id", userData.user?.id ?? "").maybeSingle();
+      if (memberError) throw memberError;
+      if (!membership) {
+        const { data: bootstrapped, error: bootstrapError } = await client.rpc("bootstrap_first_admin");
+        if (bootstrapError) throw bootstrapError;
+        if (!bootstrapped) { await client.auth.signOut(); throw new Error("This account is not authorized for the admin area."); }
+      }
       router.replace("/admin"); router.refresh();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to sign in. Check your credentials and try again."); }
     finally { setBusy(false); }
   }
-  return <main className="auth-page"><form className="auth-card" onSubmit={submit}><ShieldCheck size={22}/><span className="eyebrow">RESTRICTED ACCESS</span><h1>Admin sign in</h1><p>Sign in with your authorized admin account.</p><label>Email<input name="email" type="email" autoComplete="username" required/></label><label>Password<input name="password" type="password" autoComplete="current-password" required/></label>{error && <div className="auth-error" role="alert">{error}</div>}<button className="button-primary" type="submit" disabled={busy}>{busy ? "Signing in..." : "Sign in"}</button><a href="/">Return to videos</a></form></main>;
+  return <main className="auth-page"><form className="auth-card" onSubmit={submit}><ShieldCheck size={22}/><span className="eyebrow">RESTRICTED ACCESS</span><h1>{signup ? "First admin signup" : "Admin sign in"}</h1><p>{signup ? "Only the email configured for first-admin setup can claim admin access." : "Sign in with your authorized admin account."}</p><label>Email<input name="email" type="email" autoComplete="username" required/></label><label>Password<input name="password" type="password" autoComplete={signup ? "new-password" : "current-password"} minLength={signup ? 12 : undefined} required/></label>{signup && <label>Confirm password<input name="confirm_password" type="password" autoComplete="new-password" minLength={12} required/></label>}<input type="hidden" name="mode" value={signup ? "signup" : "signin"}/>{error && <div className="auth-error" role="alert">{error}</div>}{notice && <div className="auth-notice" role="status">{notice}</div>}<button className="button-primary" type="submit" disabled={busy}>{busy ? "Please wait..." : signup ? "Create first admin account" : "Sign in"}</button><button className="auth-mode" type="button" onClick={() => { setSignup(!signup); setError(""); setNotice(""); }}>{signup ? "Already have an account? Sign in" : "First time? Sign up"}</button><a href="/">Return to videos</a></form></main>;
 }

@@ -31,6 +31,11 @@ create table if not exists public.admins (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.admin_bootstrap_settings (
+  singleton boolean primary key default true check (singleton),
+  email text not null
+);
+
 create table if not exists public.video_view_events (
   video_id uuid not null references public.videos(id) on delete cascade,
   viewer_key uuid not null,
@@ -55,6 +60,7 @@ grant execute on function public.is_library_admin() to anon;
 alter table public.categories enable row level security;
 alter table public.videos enable row level security;
 alter table public.admins enable row level security;
+alter table public.admin_bootstrap_settings enable row level security;
 alter table public.video_view_events enable row level security;
 
 drop policy if exists "Public can read categories" on public.categories;
@@ -69,6 +75,29 @@ create policy "Admins manage videos" on public.videos for all to authenticated u
 
 drop policy if exists "Admins can read own membership" on public.admins;
 create policy "Admins can read own membership" on public.admins for select to authenticated using (user_id = (select auth.uid()));
+revoke all on public.admins, public.admin_bootstrap_settings, public.video_view_events from anon, authenticated;
+grant select on public.admins to authenticated;
+
+create or replace function public.bootstrap_first_admin()
+returns boolean
+language plpgsql security definer set search_path = public
+as $$
+declare
+  allowed_email text;
+begin
+  if auth.uid() is null then return false; end if;
+  select email into allowed_email from public.admin_bootstrap_settings where singleton = true for update;
+  if allowed_email is null or lower(allowed_email) <> lower(coalesce(auth.jwt() ->> 'email', '')) then return false; end if;
+  if not exists (select 1 from auth.users where id = auth.uid() and email_confirmed_at is not null and lower(email) = lower(allowed_email)) then return false; end if;
+  if exists (select 1 from public.admins) then return false; end if;
+  insert into public.admins (user_id) values (auth.uid()) on conflict do nothing;
+  if not found then return false; end if;
+  delete from public.admin_bootstrap_settings where singleton = true;
+  return true;
+end;
+$$;
+revoke all on function public.bootstrap_first_admin() from public;
+grant execute on function public.bootstrap_first_admin() to authenticated;
 
 create or replace function public.record_video_view(p_video_id uuid, p_viewer_key uuid)
 returns boolean
@@ -109,6 +138,6 @@ grant execute on function public.library_dashboard_stats() to authenticated;
 
 grant select on public.categories, public.videos to anon, authenticated;
 grant insert, update, delete on public.categories, public.videos to authenticated;
-grant select on public.admins to authenticated;
+revoke all on public.video_view_events from anon, authenticated;
 
 comment on table public.admins is 'Add an admin by inserting the matching auth.users.id from the Supabase SQL editor.';

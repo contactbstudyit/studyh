@@ -8,8 +8,11 @@ import { useRecommendedVideos, recordPublicVideoView } from "@/hooks/use-library
 import type { VideoRecord } from "@/hooks/use-library";
 import { VideoPlayer } from "@/components/video-player";
 import styles from "@/components/watch-page.module.css";
+import type { VideoSourceType } from "@/lib/video-playback";
 
-export default function WatchPage({ video }: { video: VideoRecord }) {
+type WatchVideo = Omit<VideoRecord, "video_url">;
+
+export default function WatchPage({ video, playbackUrl, playbackType, sourceHost }: { video: WatchVideo; playbackUrl: string; playbackType: VideoSourceType; sourceHost: string }) {
   const router = useRouter();
   const [search, setSearch] = useState("");
   const [viewCount, setViewCount] = useState(video.views);
@@ -45,7 +48,7 @@ export default function WatchPage({ video }: { video: VideoRecord }) {
 
     <div className="watch-page-content">
       <section className="watch-page-current" aria-label="Now playing">
-        <VideoPlayer video={video}/>
+        <VideoPlayer video={video} playbackUrl={playbackUrl} playbackType={playbackType} sourceHost={sourceHost}/>
         <div className="watch-page-details">
           <div className="watch-page-title"><h1>{video.title}</h1><span>{viewCount.toLocaleString()} views</span></div>
           {video.description && <p>{video.description}</p>}

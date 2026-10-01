@@ -248,7 +248,7 @@ export function useVideos(options: { categoryId?: string; search?: string; searc
   return { videos, loading, hasMore, page, totalCount, refresh, loadMore, create, update, remove, getMissingThumbnails, recordView };
 }
 
-export function useRecommendedVideos(currentVideo: VideoRecord) {
+export function useRecommendedVideos(currentVideo: Pick<VideoRecord, "id" | "category_id">) {
   const [videos, setVideos] = useState<VideoRecord[]>([]);
   const [initialLoading, setInitialLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);

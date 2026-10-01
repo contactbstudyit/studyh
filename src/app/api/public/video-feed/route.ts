@@ -9,7 +9,6 @@ const FETCH_CHUNK = 500;
 type FeedVideo = {
   id: string;
   title: string;
-  video_url: string;
   description: string;
   thumbnail_url: string | null;
   category_id: string;
@@ -60,7 +59,7 @@ export async function GET(request: NextRequest) {
 
     const rows: FeedVideo[] = [];
     for (let offset = 0; ; offset += FETCH_CHUNK) {
-      let query = supabase.from("videos").select("id,title,video_url,description,thumbnail_url,category_id,tags,duration,views,featured,published,created_at,updated_at,categories(name)").eq("published", true);
+      let query = supabase.from("videos").select("id,title,description,thumbnail_url,category_id,tags,duration,views,featured,published,created_at,updated_at,categories(name)").eq("published", true);
       if (categoryId) query = query.eq("category_id", categoryId);
       if (excludeId) query = query.neq("id", excludeId);
       if (search) {

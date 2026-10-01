@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import WatchPage from "@/components/watch-page";
 import { getPublicVideoById } from "@/lib/category-routes";
+import { createVideoPlaybackUrl } from "@/lib/media-playback-server";
+import { detectSourceType, getSourceHost } from "@/lib/video-playback";
 
 export const dynamic = "force-dynamic";
 const VIDEO_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -21,5 +23,6 @@ export default async function WatchRoute({ params }: PageProps) {
   if (!VIDEO_ID_PATTERN.test(id)) notFound();
   const video = await getPublicVideoById(id);
   if (!video) notFound();
-  return <WatchPage video={video} />;
+  const { video_url: sourceUrl, ...publicVideo } = video;
+  return <WatchPage video={publicVideo} playbackUrl={createVideoPlaybackUrl(video.id)} playbackType={detectSourceType(sourceUrl)} sourceHost={getSourceHost(sourceUrl)} />;
 }

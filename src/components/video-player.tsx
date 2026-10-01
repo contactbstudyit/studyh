@@ -3,18 +3,24 @@
 import { useEffect, useRef, useState } from "react";
 import { Command, Film } from "lucide-react";
 import type { VideoRecord } from "@/hooks/use-library";
-import { createMediaProxyUrl, detectSourceType, getPlaybackFailureReason, getSourceHost, probeVideoSource, supportsNativeHls } from "@/lib/video-playback";
+import { getPlaybackFailureReason, probeVideoSource, supportsNativeHls } from "@/lib/video-playback";
 import type { SourceProbe, VideoSourceType } from "@/lib/video-playback";
 
-export function VideoPlayer({ video }: { video: VideoRecord }) {
+type WatchVideo = Omit<VideoRecord, "video_url">;
+
+export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost }: {
+  video: WatchVideo;
+  playbackUrl: string;
+  playbackType: VideoSourceType;
+  sourceHost: string;
+}) {
   const [failure, setFailure] = useState("");
   const [loading, setLoading] = useState(true);
   const [attempt, setAttempt] = useState(0);
-  const [usingProxy, setUsingProxy] = useState(false);
-  const [sourceType, setSourceType] = useState<VideoSourceType>("unknown");
-  const [diagnostics, setDiagnostics] = useState<SourceProbe & { sourceType: VideoSourceType; hlsType: string | null; hlsDetails: string | null; hlsStatus: number | null; hlsUrl: string | null; hlsFatal: boolean | null; mediaErrorCode: number | null }>({
+  const [sourceType, setSourceType] = useState<VideoSourceType>(playbackType);
+  const [diagnostics, setDiagnostics] = useState<SourceProbe & { hlsType: string | null; hlsDetails: string | null; hlsStatus: number | null; mediaErrorCode: number | null }>({
     status: null, contentType: null, finalHost: null, error: null,
-    sourceType: "unknown", hlsType: null, hlsDetails: null, hlsStatus: null, hlsUrl: null, hlsFatal: null, mediaErrorCode: null,
+    hlsType: null, hlsDetails: null, hlsStatus: null, mediaErrorCode: null,
   });
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<import("hls.js").default | null>(null);
@@ -27,114 +33,95 @@ export function VideoPlayer({ video }: { video: VideoRecord }) {
     let active = true;
     let dash: { initialize: (media: HTMLVideoElement, source: string, autoplay: boolean) => void; on: (event: string, callback: (event?: unknown) => void) => void; reset: () => void } | undefined;
     let probe: SourceProbe | null = null;
-    let resolvedType = detectSourceType(video.video_url);
-    const host = getSourceHost(video.video_url);
-    const initialType = resolvedType;
+    let resolvedType = playbackType;
+    const lifecycle = { attachMediaCalled: false, mediaAttached: false, manifestLoading: false, manifestLoaded: false, manifestParsed: false, fragLoading: false, fragLoaded: false };
     playbackReportedRef.current = false;
     hlsManagedRef.current = false;
-    setFailure(""); setLoading(true); setSourceType(initialType);
-    setDiagnostics({ status: null, contentType: null, finalHost: null, error: null, sourceType: initialType, hlsType: null, hlsDetails: null, hlsStatus: null, hlsUrl: null, hlsFatal: null, mediaErrorCode: null });
+    setFailure(""); setLoading(true); setSourceType(playbackType);
+    setDiagnostics({ status: null, contentType: null, finalHost: null, error: null, hlsType: null, hlsDetails: null, hlsStatus: null, mediaErrorCode: null });
     if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
-    if (process.env.NODE_ENV === "development") console.info("[video-playback] source selected", { originalVideoUrl: video.video_url, sourceHost: host, sourceType: initialType, pageOrigin: window.location.origin, hasThumbnail: Boolean(video.thumbnail_url), attempt, usingProxy });
+    if (process.env.NODE_ENV === "development") console.info("[video-playback] secure relay selected", { sourceHost, playbackType, pageOrigin: window.location.origin, attempt });
 
-    const recordProbe = (result: SourceProbe) => {
-      probe = result;
+    const probePromise = playbackType === "unknown" ? probeVideoSource(playbackUrl) : null;
+    if (probePromise) void probePromise.then((result) => { probe = result; if (active) setDiagnostics((current) => ({ ...current, ...result })); });
+    const fail = (detail?: { type?: string; details?: string; status?: number | null }) => {
       if (!active) return;
-      const detectedType = detectSourceType(video.video_url, result.contentType);
-      setSourceType((current) => current === "unknown" ? detectedType : current);
-      setDiagnostics((current) => ({ ...current, ...result, sourceType: current.sourceType === "unknown" ? detectedType : current.sourceType }));
-      if (process.env.NODE_ENV === "development") console.info("[video-playback] source metadata", { sourceHost: host, sourceType: detectedType, status: result.status, contentType: result.contentType, finalHost: result.finalHost, error: result.error });
-    };
-    const probePromise = initialType === "unknown" ? probeVideoSource(video.video_url) : null;
-    if (probePromise) void probePromise.then(recordProbe);
-    const hlsLifecycle = { attachMediaCalled: false, mediaAttached: false, manifestLoading: false, manifestLoaded: false, manifestParsed: false, fragLoading: false, fragLoaded: false };
-
-    const fail = (detail?: { hlsType?: string; hlsDetails?: string; hlsStatus?: number | null; hlsUrl?: string | null; hlsFatal?: boolean | null }) => {
-      if (!active) return;
-      const type = detail?.hlsType ?? null;
-      const details = detail?.hlsDetails ?? null;
-      const status = detail?.hlsStatus ?? null;
-      const hlsUrl = usingProxy ? null : detail?.hlsUrl ?? null;
-      const fatal = detail?.hlsFatal ?? null;
-      setLoading(false);
-      setDiagnostics((current) => ({ ...current, hlsType: type, hlsDetails: details, hlsStatus: status, hlsUrl, hlsFatal: fatal }));
-      const reason = getPlaybackFailureReason({ sourceType: detectSourceType(video.video_url, probe?.contentType), httpStatus: probe?.status ?? null, probeError: probe?.error ?? null, hlsType: type, hlsDetails: details, hlsStatus: status });
-      setFailure(reason);
-      if (process.env.NODE_ENV === "development") console.error("[video-playback] failed", { originalVideoUrl: video.video_url, pageOrigin: window.location.origin, sourceHost: host, sourceType: detectSourceType(video.video_url, probe?.contentType), httpStatus: status ?? probe?.status ?? null, contentType: probe?.contentType ?? null, hlsType: type, hlsDetails: details, hlsStatus: status, hlsFatal: fatal, hlsUrl, fallback: usingProxy ? "secure media proxy" : "none", hlsLifecycle: { ...hlsLifecycle }, reason });
+      const hlsType = detail?.type ?? null;
+      const hlsDetails = detail?.details ?? null;
+      const hlsStatus = detail?.status ?? null;
+      const reason = getPlaybackFailureReason({ sourceType: resolvedType, httpStatus: hlsStatus ?? probe?.status ?? null, probeError: probe?.error ?? null, hlsType, hlsDetails, hlsStatus });
+      setDiagnostics((current) => ({ ...current, hlsType, hlsDetails, hlsStatus }));
+      setFailure(reason); setLoading(false);
+      if (process.env.NODE_ENV === "development") console.error("[video-playback] secure relay failed", { sourceHost, playbackType: resolvedType, pageOrigin: window.location.origin, ...detail, reason, lifecycle: { ...lifecycle } });
     };
 
     element.pause(); element.removeAttribute("src"); element.load();
     void (async () => {
       try {
-        let type = initialType;
-        if (type === "unknown" && probePromise) { const metadata = await probePromise; type = detectSourceType(video.video_url, metadata.contentType); }
+        if (resolvedType === "unknown" && probePromise) resolvedType = await probePromise.then((result) => {
+          probe = result;
+          return result;
+        }).then((result) => {
+          const detected = result.contentType?.toLowerCase() ?? "";
+          if (detected.includes("mpegurl") || detected.includes("m3u")) return "hls";
+          if (detected.includes("dash+xml")) return "dash";
+          if (detected.includes("video/webm")) return "webm";
+          if (detected.includes("video/mp4") || detected.includes("application/mp4")) return "mp4";
+          return "unknown";
+        });
         if (!active) return;
-        resolvedType = type; setSourceType(type); setDiagnostics((current) => ({ ...current, sourceType: type }));
-        const activeSourceUrl = usingProxy ? createMediaProxyUrl(video.video_url) : video.video_url;
-        if (type === "hls") {
-          const nativeHls = supportsNativeHls(element);
-          if (nativeHls) { element.src = activeSourceUrl; element.load(); }
-          else {
+
+        if (resolvedType === "hls") {
+          if (supportsNativeHls(element)) {
+            element.src = playbackUrl; element.load();
+          } else {
             const HlsPlayer = (await import("hls.js")).default;
             if (!active) return;
-            const hlsSupported = HlsPlayer.isSupported();
-            const nativeSupport = element.canPlayType("application/vnd.apple.mpegurl");
-            if (process.env.NODE_ENV === "development") console.info("[video-playback] HLS capability", { originalVideoUrl: video.video_url, pageOrigin: window.location.origin, userAgent: navigator.userAgent, hlsSupported, canPlayType: nativeSupport, nativeHlsSelected: nativeHls });
-            if (!hlsSupported) { fail({ hlsType: "unsupported", hlsDetails: "Hls.js reports MediaSource is unsupported in this browser", hlsFatal: true }); return; }
+            const supported = HlsPlayer.isSupported();
+            if (process.env.NODE_ENV === "development") console.info("[HLS capability]", { sourceHost, pageOrigin: window.location.origin, hlsSupported: supported, canPlayType: element.canPlayType("application/vnd.apple.mpegurl") });
+            if (!supported) { fail({ type: "unsupported", details: "hls.js reports MediaSource is unsupported in this browser", status: null }); return; }
             if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
             const hls = new HlsPlayer({ enableWorker: true, lowLatencyMode: false });
             hlsRef.current = hls; hlsManagedRef.current = true;
-            hls.on(HlsPlayer.Events.MEDIA_ATTACHED, (_event, data) => { hlsLifecycle.mediaAttached = true; if (process.env.NODE_ENV === "development") console.info("[HLS MEDIA_ATTACHED]", { source: host, originalVideoUrl: video.video_url, pageOrigin: window.location.origin, data }); });
-            hls.on(HlsPlayer.Events.MANIFEST_LOADING, (_event, data) => { hlsLifecycle.manifestLoading = true; if (process.env.NODE_ENV === "development") console.info("[HLS MANIFEST_LOADING]", { source: host, url: data.url, originalVideoUrl: video.video_url, pageOrigin: window.location.origin }); });
-            hls.on(HlsPlayer.Events.MANIFEST_LOADED, (_event, data) => { hlsLifecycle.manifestLoaded = true; if (process.env.NODE_ENV === "development") console.info("[HLS MANIFEST_LOADED]", { source: host, url: data.url, levels: data.levels?.length ?? 0, originalVideoUrl: video.video_url, pageOrigin: window.location.origin }); });
-            hls.on(HlsPlayer.Events.MANIFEST_PARSED, (_event, data) => {
-              hlsLifecycle.manifestParsed = true;
-              if (!active) return;
-              setLoading(false);
-              if (process.env.NODE_ENV === "development") console.info("[HLS MANIFEST_PARSED]", { source: host, originalVideoUrl: video.video_url, pageOrigin: window.location.origin, levels: data.levels?.length ?? 0 });
-              void element.play().catch((error: unknown) => { if (process.env.NODE_ENV === "development") console.info("[video-playback] autoplay not allowed; native controls remain available", error instanceof Error ? error.message : error); });
-            });
-            hls.on(HlsPlayer.Events.FRAG_LOADING, (_event, data) => { hlsLifecycle.fragLoading = true; if (process.env.NODE_ENV === "development") console.info("[HLS FRAG_LOADING]", { source: host, url: data.frag.url, level: data.frag.level, sn: data.frag.sn, pageOrigin: window.location.origin }); });
-            hls.on(HlsPlayer.Events.FRAG_LOADED, (_event, data) => { hlsLifecycle.fragLoaded = true; const loaded = data as typeof data & { stats?: { loaded?: number } }; if (process.env.NODE_ENV === "development") console.info("[HLS FRAG_LOADED]", { source: host, url: data.frag.url, level: data.frag.level, sn: data.frag.sn, loadedBytes: loaded.stats?.loaded ?? null, pageOrigin: window.location.origin }); });
+            hls.on(HlsPlayer.Events.MEDIA_ATTACHED, (_event, data) => { lifecycle.mediaAttached = true; if (process.env.NODE_ENV === "development") console.info("[HLS MEDIA_ATTACHED]", { sourceHost, data }); });
+            hls.on(HlsPlayer.Events.MANIFEST_LOADING, () => { lifecycle.manifestLoading = true; if (process.env.NODE_ENV === "development") console.info("[HLS MANIFEST_LOADING]", { sourceHost, request: "same-origin relay" }); });
+            hls.on(HlsPlayer.Events.MANIFEST_LOADED, (_event, data) => { lifecycle.manifestLoaded = true; if (process.env.NODE_ENV === "development") console.info("[HLS MANIFEST_LOADED]", { sourceHost, levels: data.levels?.length ?? 0 }); });
+            hls.on(HlsPlayer.Events.MANIFEST_PARSED, (_event, data) => { lifecycle.manifestParsed = true; if (!active) return; setLoading(false); if (process.env.NODE_ENV === "development") console.info("[HLS MANIFEST_PARSED]", { sourceHost, levels: data.levels?.length ?? 0 }); void element.play().catch(() => {}); });
+            hls.on(HlsPlayer.Events.FRAG_LOADING, (_event, data) => { lifecycle.fragLoading = true; if (process.env.NODE_ENV === "development") console.info("[HLS FRAG_LOADING]", { sourceHost, level: data.frag.level, sequence: data.frag.sn }); });
+            hls.on(HlsPlayer.Events.FRAG_LOADED, (_event, data) => { lifecycle.fragLoaded = true; if (process.env.NODE_ENV === "development") console.info("[HLS FRAG_LOADED]", { sourceHost, level: data.frag.level, sequence: data.frag.sn }); });
             hls.on(HlsPlayer.Events.ERROR, (_event, data) => {
-              const status = data.response?.code ?? null;
-              const actualUrl = data.url ?? data.response?.url ?? null;
-              const responseText = typeof data.response?.text === "string" ? data.response.text.slice(0, 500) : "";
-              const detailText = usingProxy && responseText ? `${data.details}: ${responseText}` : String(data.details);
-              const detail = { hlsType: String(data.type), hlsDetails: detailText, hlsStatus: status, hlsUrl: actualUrl, hlsFatal: data.fatal };
-              const corsOrRejected = status === 401 || status === 403 || ((status === 0 || status === null) && String(data.type).toLowerCase().includes("network"));
-              if (process.env.NODE_ENV === "development") {
-                const websiteRequest = status === 401 || status === 403 ? `Blocked (HTTP ${status})` : (status === 0 || status === null) && String(data.type).toLowerCase().includes("network") ? "Blocked (CORS/network; no HTTP status exposed)" : data.fatal ? "Failed" : "Recoverable/nonfatal";
-                const responseData = usingProxy ? { code: data.response?.code, text: data.response?.text } : data.response;
-                console[data.fatal ? "error" : "warn"]("[HLS ERROR]", { originalVideoUrl: video.video_url, pageOrigin: window.location.origin, hlsSupported, nativeHlsSupport: nativeSupport, source: host, format: "HLS", directBrowser: playbackReportedRef.current ? "Playable before failure" : "Not confirmed in this page", websiteHlsRequest: websiteRequest, fallback: usingProxy ? "secure media proxy" : "none", lifecycle: { ...hlsLifecycle }, type: data.type, details: data.details, fatal: data.fatal, url: usingProxy ? "[secure media relay resource]" : data.url, response: responseData, responseCode: data.response?.code, reason: data.reason, error: data.error, hlsInstanceUrl: usingProxy ? "[secure media relay resource]" : actualUrl });
-              }
-              if (data.fatal && !usingProxy && corsOrRejected) { if (process.env.NODE_ENV === "development") console.warn("[media-proxy] direct HLS failed; starting one secure relay attempt", { source: host, directStatus: status, details: data.details }); setFailure(""); setLoading(true); setUsingProxy(true); setAttempt((current) => current + 1); return; }
+              const detail = { type: String(data.type), details: String(data.details), status: data.response?.code ?? null };
+              if (process.env.NODE_ENV === "development") console[data.fatal ? "error" : "warn"]("[HLS ERROR]", { sourceHost, pageOrigin: window.location.origin, ...detail, fatal: data.fatal, relayUrl: "[opaque same-origin playback token]", response: data.response, reason: data.reason, error: data.error, lifecycle: { ...lifecycle } });
               if (data.fatal) fail(detail);
             });
-            hls.loadSource(activeSourceUrl); hls.attachMedia(element); hlsLifecycle.attachMediaCalled = true;
-            if (process.env.NODE_ENV === "development") console.info("[video-playback] HLS source loaded", { source: host, originalVideoUrl: video.video_url, hlsLoadSourceUrl: usingProxy ? "same-origin secure relay" : video.video_url, pageOrigin: window.location.origin, attachMediaCalled: true, mediaAttachedEvent: hlsLifecycle.mediaAttached });
-            if (usingProxy) console.info("[media-proxy] HLS fallback active", { source: host, pageOrigin: window.location.origin });
+            hls.loadSource(playbackUrl); hls.attachMedia(element); lifecycle.attachMediaCalled = true;
           }
-        } else if (type === "dash") {
-          const dashModule = await import("dashjs"); if (!active) return; const factory = dashModule.MediaPlayer() as unknown as { create: () => typeof dash }; dash = factory.create(); if (!dash) { fail({ hlsType: "DASH", hlsDetails: "DASH player could not be initialized" }); return; } dash.initialize(element, video.video_url, true); dash.on(dashModule.MediaPlayer.events.ERROR, (event) => { const info = event && typeof event === "object" ? event as { error?: { message?: string }; code?: number; message?: string } : {}; const detail = { hlsType: "DASH", hlsDetails: info.error?.message ?? info.message ?? "DASH playback error", hlsStatus: info.code ?? undefined }; if (process.env.NODE_ENV === "development") console.error("[video-playback] DASH error", { sourceHost: host, ...detail }); fail(detail); });
-        } else { element.src = activeSourceUrl; element.load(); }
-      } catch (error) { const details = error instanceof Error ? error.message : "Player initialization failed"; if (process.env.NODE_ENV === "development") console.error("[video-playback] player initialization failed", { sourceHost: host, sourceType: resolvedType, error: details }); fail({ hlsType: "player initialization", hlsDetails: details, hlsFatal: true }); }
+        } else if (resolvedType === "dash") {
+          const dashModule = await import("dashjs"); if (!active) return;
+          const factory = dashModule.MediaPlayer() as unknown as { create: () => typeof dash };
+          dash = factory.create();
+          if (!dash) { fail({ type: "DASH", details: "DASH player could not be initialized", status: null }); return; }
+          dash.initialize(element, playbackUrl, true);
+          dash.on(dashModule.MediaPlayer.events.ERROR, (event) => { const info = event && typeof event === "object" ? event as { error?: { message?: string }; code?: number; message?: string } : {}; fail({ type: "DASH", details: info.error?.message ?? info.message ?? "DASH playback error", status: info.code ?? null }); });
+        } else { element.src = playbackUrl; element.load(); }
+      } catch (error) {
+        const details = error instanceof Error ? error.message : "Player initialization failed";
+        fail({ type: "player initialization", details, status: null });
+      }
     })();
-    return () => { active = false; hlsManagedRef.current = false; if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; } dash?.reset(); element.pause(); element.removeAttribute("src"); element.load(); };
-  }, [video.video_url, attempt]);
+    return () => { active = false; hlsManagedRef.current = false; hlsRef.current?.destroy(); hlsRef.current = null; dash?.reset(); element.pause(); element.removeAttribute("src"); element.load(); };
+  }, [playbackUrl, playbackType, sourceHost, attempt]);
 
   function handleMediaError(event: React.SyntheticEvent<HTMLVideoElement>) {
     if (failure) return;
     const mediaErrorCode = event.currentTarget.error?.code ?? null;
-    if (sourceType === "hls" && hlsManagedRef.current) { if (process.env.NODE_ENV === "development") console.warn("[video-playback] HTMLMediaElement emitted an error while hls.js is recovering; waiting for HLS fatal status", { sourceHost: getSourceHost(video.video_url), mediaErrorCode, mediaErrorMessage: event.currentTarget.error?.message }); return; }
-    if (!usingProxy && (sourceType === "mp4" || sourceType === "webm" || sourceType === "hls") && mediaErrorCode === 2) { if (process.env.NODE_ENV === "development") console.warn("[media-proxy] native direct media request failed; starting one secure relay attempt", { source: getSourceHost(video.video_url), sourceType, pageOrigin: window.location.origin, mediaErrorCode }); setFailure(""); setLoading(true); setUsingProxy(true); setAttempt((current) => current + 1); return; }
+    if (sourceType === "hls" && hlsManagedRef.current) { if (process.env.NODE_ENV === "development") console.warn("[video-playback] media element error while hls.js is active; waiting for fatal HLS event", { sourceHost, mediaErrorCode }); return; }
     const reason = getPlaybackFailureReason({ sourceType, httpStatus: diagnostics.status, probeError: diagnostics.error, mediaErrorCode, hlsType: diagnostics.hlsType, hlsDetails: diagnostics.hlsDetails, hlsStatus: diagnostics.hlsStatus });
     setDiagnostics((current) => ({ ...current, mediaErrorCode })); setLoading(false); setFailure(reason);
-    if (process.env.NODE_ENV === "development") console.error("[video-playback] HTMLMediaElement error", { sourceHost: getSourceHost(video.video_url), sourceType, httpStatus: diagnostics.status, contentType: diagnostics.contentType, corsProbeError: diagnostics.error, mediaErrorCode, mediaErrorMessage: event.currentTarget.error?.message, reason });
+    if (process.env.NODE_ENV === "development") console.error("[video-playback] relay media error", { sourceHost, sourceType, mediaErrorCode, mediaErrorMessage: event.currentTarget.error?.message, reason });
   }
 
-  function handlePlaybackStarted() { setLoading(false); if (!playbackReportedRef.current && process.env.NODE_ENV === "development") { playbackReportedRef.current = true; console.info("[video-playback] playback confirmed", { source: getSourceHost(video.video_url), format: sourceType.toUpperCase(), directBrowser: "Playable" }); } }
-  const sourceHost = getSourceHost(video.video_url);
-  const diagnosticLines = [`Source: ${sourceHost}`, `Type: ${sourceType.toUpperCase()}`, diagnostics.hlsStatus !== null ? `Media HTTP status: ${diagnostics.hlsStatus}` : diagnostics.status !== null ? `Metadata HTTP status: ${diagnostics.status}` : null, diagnostics.contentType ? `Content-Type: ${diagnostics.contentType}` : null, usingProxy ? "Fallback: secure media proxy" : null, diagnostics.hlsDetails ? `Player detail: ${diagnostics.hlsDetails}` : null, process.env.NODE_ENV === "development" && diagnostics.hlsFatal !== null ? `Fatal: ${diagnostics.hlsFatal}` : null, process.env.NODE_ENV === "development" && diagnostics.hlsUrl ? `URL: ${diagnostics.hlsUrl}` : null].filter(Boolean);
-  return <div className="player-frame" data-source-type={sourceType}><video ref={videoRef} controls autoPlay playsInline preload="metadata" poster={video.thumbnail_url || undefined} onLoadedMetadata={() => setLoading(false)} onCanPlay={() => setLoading(false)} onPlaying={handlePlaybackStarted} onWaiting={() => setLoading(true)} onError={handleMediaError}/>{loading && !failure && <div className="player-loading"><span className="spinner"/><span>{usingProxy ? "Connecting to video…" : "Loading video..."}</span></div>}{failure && <div className="player-error"><Film size={24}/><strong>Unable to play this video</strong><span className="player-reason">{failure}</span><span className="player-diagnostics">{diagnosticLines.join(" · ")}</span><button type="button" onClick={() => { setFailure(""); setAttempt((current) => current + 1); }}>Try again</button></div>}<span className="player-hint"><Command size={12}/> SPACE TO PLAY</span></div>;
+  function handlePlaybackStarted() { setLoading(false); if (!playbackReportedRef.current && process.env.NODE_ENV === "development") { playbackReportedRef.current = true; console.info("[video-playback] playback confirmed", { source: sourceHost, format: sourceType.toUpperCase(), relay: "same-origin" }); } }
+  const diagnosticLines = [`Source: ${sourceHost}`, `Format: ${sourceType.toUpperCase()}`, diagnostics.hlsStatus !== null ? `HTTP status: ${diagnostics.hlsStatus}` : null, diagnostics.hlsDetails ? `Player detail: ${diagnostics.hlsDetails}` : null];
+  return <div className="player-frame" data-source-type={sourceType}><video ref={videoRef} controls autoPlay playsInline preload="metadata" poster={video.thumbnail_url || undefined} onLoadedMetadata={() => setLoading(false)} onCanPlay={() => setLoading(false)} onPlaying={handlePlaybackStarted} onWaiting={() => setLoading(true)} onError={handleMediaError}/>{loading && !failure && <div className="player-loading"><span className="spinner"/><span>Loading video...</span></div>}{failure && <div className="player-error"><Film size={24}/><strong>Unable to play this video</strong><span className="player-reason">{failure}</span><span className="player-diagnostics">{diagnosticLines.join(" · ")}</span><button type="button" onClick={() => { setFailure(""); setAttempt((current) => current + 1); }}>Try again</button></div>}<span className="player-hint"><Command size={12}/> SPACE TO PLAY</span></div>;
 }

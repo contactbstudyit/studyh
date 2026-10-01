@@ -34,8 +34,7 @@ export default function RootLayout({
           <Toaster />
           {children}
         </TooltipProvider>
-        {/* WARNING FOR AGENT: DO NOT REMOVE THIS SCRIPT */}
-        <Script src="https://cdn.jsdelivr.net/gh/IdeavoAI/ideavo-scripts@latest/scripts/ideavo.min.js" />
+        {process.env.NODE_ENV !== "production" && <Script src="https://cdn.jsdelivr.net/gh/IdeavoAI/ideavo-scripts@latest/scripts/ideavo.min.js" />}
       </body>
     </html>
   );

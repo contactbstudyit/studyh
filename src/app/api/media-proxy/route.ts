@@ -7,12 +7,14 @@ import { Readable } from "node:stream";
 import { createBrotliDecompress, createGunzip, createInflate } from "node:zlib";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createMediaResourceToken, readMediaResourceToken, verifyVideoPlaybackToken } from "@/lib/media-playback-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const MAX_REDIRECTS = 5;
 const MAX_MANIFEST_BYTES = 2 * 1024 * 1024;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ALLOWED_RESPONSE_HEADERS = [
   "accept-ranges", "content-length", "content-range", "content-type", "etag", "last-modified",
 ] as const;
@@ -114,12 +116,15 @@ function verifySignature(secret: Buffer, provided: string, source: string, base:
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
-function makeProxyUrl(requestUrl: string, source: string, base: string, target: string, secret: Buffer) {
+function makeProxyUrl(requestUrl: string, source: string, base: string, target: string, secret: Buffer, videoId?: string) {
   const proxyUrl = new URL("/api/media-proxy", requestUrl);
-  proxyUrl.searchParams.set("source", source);
-  proxyUrl.searchParams.set("base", base);
-  proxyUrl.searchParams.set("url", target);
-  proxyUrl.searchParams.set("sig", proxySignature(secret, source, base, target));
+  if (videoId) proxyUrl.searchParams.set("resource", createMediaResourceToken(videoId, source, base, target));
+  else {
+    proxyUrl.searchParams.set("source", source);
+    proxyUrl.searchParams.set("base", base);
+    proxyUrl.searchParams.set("url", target);
+    proxyUrl.searchParams.set("sig", proxySignature(secret, source, base, target));
+  }
   return `${proxyUrl.pathname}${proxyUrl.search}`;
 }
 
@@ -127,14 +132,14 @@ function getApplicationOrigin(request: NextRequest) {
   return new URL(request.url).origin;
 }
 
-function rewriteManifest(body: string, applicationOrigin: string, source: string, manifestUrl: string, secret: Buffer) {
+function rewriteManifest(body: string, applicationOrigin: string, source: string, manifestUrl: string, secret: Buffer, videoId?: string) {
   const rewrite = (raw: string) => {
     const value = raw.trim();
     try {
       const target = new URL(value, manifestUrl);
       if (target.protocol !== "http:" && target.protocol !== "https:") return raw;
       if (target.protocol !== "https:") throw new Error("Insecure playlist resource URL");
-      return makeProxyUrl(applicationOrigin, source, manifestUrl, target.toString(), secret);
+      return makeProxyUrl(applicationOrigin, source, manifestUrl, target.toString(), secret, videoId);
     } catch (error) {
       if (error instanceof TypeError) throw new Error("Invalid URL in external HLS manifest");
       throw error;
@@ -261,10 +266,40 @@ async function relay(request: NextRequest) {
   const requestOrigin = request.headers.get("origin");
   if (requestOrigin && requestOrigin !== getApplicationOrigin(request)) return errorResponse(request, "Cross-origin media proxy requests are not allowed", 403);
   const params = request.nextUrl.searchParams;
-  const source = params.get("source");
-  const targetRaw = params.get("url");
-  const base = params.get("base") || source;
-  const signature = params.get("sig");
+  const videoToken = params.get("video");
+  const resourceToken = params.get("resource");
+  const secret = getSigningSecret();
+  if (!secret) return errorResponse(request, "Secure media relay signing is not configured", 503);
+  let source: string | null = null;
+  let targetRaw: string | null = null;
+  let base: string | null = null;
+  let signature: string | null = null;
+  let opaqueVideoId: string | null = null;
+  let rootRequest = false;
+
+  if (videoToken) {
+    const expires = params.get("expires") ?? "";
+    signature = params.get("sig");
+    if (!UUID_PATTERN.test(videoToken) || !signature || !verifyVideoPlaybackToken(videoToken, expires, signature)) return errorResponse(request, "Invalid or expired playback token", 403);
+    try {
+      const supabase = await createClient();
+      const { data: video, error } = await supabase.from("videos").select("video_url").eq("id", videoToken).eq("published", true).maybeSingle();
+      if (error) return errorResponse(request, "Could not verify published video", 502);
+      if (!video) return errorResponse(request, "Video is not available", 404);
+      source = video.video_url; targetRaw = video.video_url; base = video.video_url;
+      opaqueVideoId = videoToken; rootRequest = true;
+    } catch { return errorResponse(request, "Could not resolve playback source", 502); }
+  } else if (resourceToken) {
+    const resource = readMediaResourceToken(resourceToken);
+    if (!resource || !UUID_PATTERN.test(resource.videoId)) return errorResponse(request, "Invalid or expired media resource token", 403);
+    opaqueVideoId = resource.videoId;
+    source = resource.source; base = resource.base; targetRaw = resource.url;
+  } else {
+    source = params.get("source");
+    targetRaw = params.get("url");
+    base = params.get("base") || source;
+    signature = params.get("sig");
+  }
   if (!source || !targetRaw || !base) return errorResponse(request, "Missing media source parameters", 400);
   let sourceUrl: URL;
   let targetUrl: URL;
@@ -277,13 +312,13 @@ async function relay(request: NextRequest) {
     return errorResponse(request, error instanceof Error ? error.message : "Invalid external media URL", 400);
   }
 
-  const secret = getSigningSecret();
-  if (!secret) return errorResponse(request, "Secure media relay signing is not configured", 503);
-  const rootRequest = source === targetRaw && base === source && !signature;
-  if (!rootRequest && (!signature || !verifySignature(secret, signature, source, base, targetRaw))) return errorResponse(request, "Invalid or expired media resource signature", 403);
+  if (!opaqueVideoId) {
+    rootRequest = source === targetRaw && base === source && !signature;
+    if (!rootRequest && (!signature || !verifySignature(secret, signature, source, base, targetRaw))) return errorResponse(request, "Invalid or expired media resource signature", 403);
+  }
 
   try {
-    if (rootRequest) {
+    if (rootRequest && !opaqueVideoId) {
       const supabase = await createClient();
       const { data: video, error } = await supabase.from("videos").select("id").eq("video_url", source).limit(1).maybeSingle();
       if (error) return errorResponse(request, "Could not verify the published media source", 502);
@@ -295,7 +330,7 @@ async function relay(request: NextRequest) {
     const contentType = String(response.headers["content-type"] ?? "application/octet-stream");
     if (isSuccessful(status) && isManifest(finalUrl, contentType)) {
       const manifest = await readManifest(response);
-      const rewritten = rewriteManifest(manifest, getApplicationOrigin(request), source, finalUrl.toString(), secret);
+      const rewritten = rewriteManifest(manifest, getApplicationOrigin(request), source, finalUrl.toString(), secret, opaqueVideoId ?? undefined);
       const body = request.method === "HEAD" ? null : rewritten;
       const headers = responseHeaders(request, undefined, {
         "Content-Type": contentType.includes("mpegurl") || contentType.includes("m3u") ? contentType : "application/vnd.apple.mpegurl",

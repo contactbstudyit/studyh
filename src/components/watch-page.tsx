@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { ArrowLeft, ArrowRight, Command, Film, Info, Play, Search } from "lucide-react";
+import { ArrowLeft, ArrowRight, Command, Film, Play, Search } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRecommendedVideos } from "@/hooks/use-library";
@@ -49,7 +49,7 @@ export default function WatchPage({ video, playbackUrl, playbackType, sourceHost
       <section className="watch-page-current" aria-label="Now playing">
         <VideoPlayer video={video} playbackUrl={playbackUrl} playbackType={playbackType} sourceHost={sourceHost} onViewCounted={() => setViewCount((current) => current + 1)}/>
         <div className="watch-page-details">
-          <div className="watch-page-title"><h1>{video.title}</h1><span className="public-view-count" title="Displayed count includes a promotional starting component; real views are tracked separately."><span>{formatPublicViewCount(viewCount)} views</span><Info size={13} role="img" aria-label="Includes a promotional starting count"/></span></div>
+          <div className="watch-page-title"><h1>{video.title}</h1><span className="public-view-count">{formatPublicViewCount(viewCount)} views</span></div>
           {video.description && <p>{video.description}</p>}
         </div>
       </section>

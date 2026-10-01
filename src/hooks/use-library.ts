@@ -8,8 +8,10 @@ export type Category = { id: string; name: string; description: string; image_ur
 export type CategoryOption = Pick<Category, "id" | "name">;
 export type VideoRecord = { id: string; title: string; video_url: string; description: string; thumbnail_url: string | null; category_id: string; tags: string[]; duration: string; views: number; display_view_count: number; display_views?: number; published_at: string | null; featured: boolean; published: boolean; created_at: string; updated_at: string; categories?: { name: string } | null };
 export type LibraryStats = { total_videos: number; published_videos: number; total_categories: number; total_views: number };
+export type LibraryStatsDiagnostic = { phase: "Supabase RPC call" | "admin authorization check" | "response parsing/type conversion"; message: string; code: string | null; details: string | null; hint: string | null };
 export type VideoSort = "latest" | "oldest" | "most-watched" | "least-watched" | "a-z" | "z-a" | "random" | "most-liked" | "highest-rated" | "lowest-rated";
 const PAGE_SIZE = 20;
+const showDashboardStatsDiagnostics = process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_VERCEL_ENV === "preview";
 
 export async function recordPublicVideoView(id: string) {
   try {
@@ -129,28 +131,47 @@ function describeSupabaseError(error: unknown) {
 
 export function useLibraryStats() {
   const [stats, setStats] = useState<LibraryStats | null>(null);
+  const [diagnostic, setDiagnostic] = useState<LibraryStatsDiagnostic | null>(null);
   const refresh = useCallback(async () => {
+    setDiagnostic(null);
+    let phase: LibraryStatsDiagnostic["phase"] = "Supabase RPC call";
     try {
       const { data, error } = await createClient().rpc("library_dashboard_stats");
-      if (error) throw error;
-      if (!data?.[0]) throw new Error("The statistics RPC returned no rows.");
-      setStats(data[0] as LibraryStats);
+      if (error) {
+        const message = error.message.toLowerCase();
+        if (message.includes("not authorized")) phase = "admin authorization check";
+        throw error;
+      }
+      phase = "response parsing/type conversion";
+      if (!Array.isArray(data) || !data[0] || typeof data[0] !== "object") throw new Error("The statistics RPC returned an unexpected response shape.");
+      const row = data[0] as Record<string, unknown>;
+      const keys = ["total_videos", "published_videos", "total_categories", "total_views"] as const;
+      const values = keys.map((key) => Number(row[key]));
+      if (keys.some((key, index) => row[key] == null || !Number.isFinite(values[index]) || values[index] < 0)) {
+        throw new Error("The statistics RPC returned missing or invalid statistic values.");
+      }
+      const [total_videos, published_videos, total_categories, total_views] = values;
+      setStats({ total_videos, published_videos, total_categories, total_views });
     } catch (error) {
       const item = error && typeof error === "object" ? error as { message?: unknown; code?: unknown; details?: unknown; hint?: unknown } : null;
-      const info = {
+      const info: LibraryStatsDiagnostic = {
+        phase,
         message: item?.message == null ? String(error || "Unknown Supabase error") : String(item.message),
         code: item?.code == null ? null : String(item.code),
         details: item?.details == null ? null : String(item.details),
         hint: item?.hint == null ? null : String(item.hint),
       };
-      if (process.env.NODE_ENV === "development") console.error("[admin-dashboard-stats] RPC library_dashboard_stats failed", info);
-      toast.error(`Dashboard statistics failed: ${info.message}${info.code ? ` (${info.code})` : ""}`);
+      setDiagnostic(info);
+      if (showDashboardStatsDiagnostics) {
+        console.error("[admin-dashboard-stats]", info);
+        toast.error("Dashboard statistics failed. See the diagnostic details on this page.");
+      } else toast.error("Could not load dashboard statistics.");
     }
   }, []);
   useEffect(() => {
     void refresh();
   }, [refresh]);
-  return { stats, refresh };
+  return { stats, diagnostic, refresh };
 }
 
 export function useVideos(options: { categoryId?: string; search?: string; searchCategoryIds?: string[]; admin?: boolean; published?: boolean; enabled?: boolean; sort?: VideoSort; pageNumber?: number; pageSize?: number; dailyFeed?: boolean } = {}) {

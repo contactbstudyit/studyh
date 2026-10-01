@@ -138,6 +138,9 @@ body { background: #000; color: #fff; font-family: var(--font-geist-sans), syste
 .create-category-inline { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; gap: 5px; padding: 0 12px; border: 1px solid #353535; border-radius: 3px; background: #131313; color: #ddd; font-size: 10px; white-space: nowrap; cursor: pointer; }
 .create-category-inline:hover { background: #1c1c1c; border-color: #555; }
 .field-error { margin: 0; color: #f0a5a5; font-size: 10px; line-height: 1.5; letter-spacing: 0; overflow-wrap: anywhere; }
+.dashboard-diagnostic { margin: -18px 0 32px; padding: 15px; border: 1px solid #704848; border-radius: 4px; background: #170d0d; color: #e9caca; overflow-wrap: anywhere; }
+.dashboard-diagnostic h2 { margin: 0 0 10px; color: #fff; font-size: 13px; font-weight: 600; }
+.dashboard-diagnostic p { margin: 5px 0 0; color: #d5bcbc; font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .field-error button { margin-left: 7px; border: 0; background: none; color: #fff; text-decoration: underline; cursor: pointer; font-size: inherit; }
 .field-empty { margin: 0; color: #888; font-size: 10px; letter-spacing: 0; }
 .video-form-actions { display: flex; align-items: center; gap: 9px; padding-top: 3px; }

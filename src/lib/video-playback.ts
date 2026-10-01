@@ -24,6 +24,13 @@ export function detectSourceType(url: string, contentType?: string | null): Vide
   return "unknown";
 }
 
+export function supportsNativeHls(video: HTMLVideoElement, userAgent = navigator.userAgent) {
+  const canPlayHls = Boolean(video.canPlayType("application/vnd.apple.mpegurl"));
+  const isIos = /iPad|iPhone|iPod/i.test(userAgent) || /Macintosh/i.test(userAgent) && navigator.maxTouchPoints > 1;
+  const isSafari = /Safari/i.test(userAgent) && !/(Chrome|Chromium|CriOS|Edg|OPR|Android)/i.test(userAgent);
+  return canPlayHls && (isIos || isSafari);
+}
+
 export async function probeVideoSource(url: string, timeoutMs = 5000): Promise<SourceProbe> {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs);

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Clock3, Command, Film, Menu, Play, Search, Settings2, ShieldCheck, X } from "lucide-react";
 import Link from "next/link";
 import { Category, useCategories, useVideos, VideoRecord } from "@/hooks/use-library";
-import { detectSourceType, getPlaybackFailureReason, getSourceHost, probeVideoSource, SourceProbe, VideoSourceType } from "@/lib/video-playback";
+import { detectSourceType, getPlaybackFailureReason, getSourceHost, probeVideoSource, SourceProbe, supportsNativeHls, VideoSourceType } from "@/lib/video-playback";
 
 export default function Home() {
   const [activeCategory, setActiveCategory] = useState("");
@@ -44,18 +44,18 @@ function VideoPlayer({ video }: { video: VideoRecord }) {
   const [loading, setLoading] = useState(true);
   const [attempt, setAttempt] = useState(0);
   const [sourceType, setSourceType] = useState<VideoSourceType>("unknown");
-  const [diagnostics, setDiagnostics] = useState<SourceProbe & { sourceType: VideoSourceType; hlsType: string | null; hlsDetails: string | null; hlsStatus: number | null; hlsUrl: string | null; mediaErrorCode: number | null }>({
+  const [diagnostics, setDiagnostics] = useState<SourceProbe & { sourceType: VideoSourceType; hlsType: string | null; hlsDetails: string | null; hlsStatus: number | null; hlsUrl: string | null; hlsFatal: boolean | null; mediaErrorCode: number | null }>({
     status: null, contentType: null, finalHost: null, error: null,
-    sourceType: "unknown", hlsType: null, hlsDetails: null, hlsStatus: null, hlsUrl: null, mediaErrorCode: null,
+    sourceType: "unknown", hlsType: null, hlsDetails: null, hlsStatus: null, hlsUrl: null, hlsFatal: null, mediaErrorCode: null,
   });
   const videoRef = useRef<HTMLVideoElement>(null);
+  const hlsRef = useRef<import("hls.js").default | null>(null);
   const playbackReportedRef = useRef(false);
   const hlsManagedRef = useRef(false);
   useEffect(() => {
     const element = videoRef.current;
     if (!element) return;
     let active = true;
-    let hls: import("hls.js").default | undefined;
     let dash: { initialize: (media: HTMLVideoElement, source: string, autoplay: boolean) => void; on: (event: string, callback: (event?: unknown) => void) => void; reset: () => void } | undefined;
     let probe: SourceProbe | null = null;
     let resolvedType = detectSourceType(video.video_url);
@@ -64,8 +64,9 @@ function VideoPlayer({ video }: { video: VideoRecord }) {
     playbackReportedRef.current = false;
     hlsManagedRef.current = false;
     setFailure(""); setLoading(true); setSourceType(initialType);
-    setDiagnostics({ status: null, contentType: null, finalHost: null, error: null, sourceType: initialType, hlsType: null, hlsDetails: null, hlsStatus: null, hlsUrl: null, mediaErrorCode: null });
-    if (process.env.NODE_ENV === "development") console.info("[video-playback] source selected", { sourceHost: host, sourceType: initialType, hasThumbnail: Boolean(video.thumbnail_url), attempt });
+    setDiagnostics({ status: null, contentType: null, finalHost: null, error: null, sourceType: initialType, hlsType: null, hlsDetails: null, hlsStatus: null, hlsUrl: null, hlsFatal: null, mediaErrorCode: null });
+    if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
+    if (process.env.NODE_ENV === "development") console.info("[video-playback] source selected", { originalVideoUrl: video.video_url, sourceHost: host, sourceType: initialType, pageOrigin: window.location.origin, hasThumbnail: Boolean(video.thumbnail_url), attempt });
 
     const recordProbe = (result: SourceProbe) => {
       probe = result;
@@ -77,15 +78,17 @@ function VideoPlayer({ video }: { video: VideoRecord }) {
     };
     const probePromise = initialType === "unknown" ? probeVideoSource(video.video_url) : null;
     if (probePromise) void probePromise.then(recordProbe);
+    const hlsLifecycle = { attachMediaCalled: false, mediaAttached: false, manifestLoading: false, manifestLoaded: false, manifestParsed: false, fragLoading: false, fragLoaded: false };
 
-    const fail = (detail?: { hlsType?: string; hlsDetails?: string; hlsStatus?: number | null; hlsUrl?: string | null }) => {
+    const fail = (detail?: { hlsType?: string; hlsDetails?: string; hlsStatus?: number | null; hlsUrl?: string | null; hlsFatal?: boolean | null }) => {
       if (!active) return;
       const type = detail?.hlsType ?? null;
       const details = detail?.hlsDetails ?? null;
       const status = detail?.hlsStatus ?? null;
       const hlsUrl = detail?.hlsUrl ?? null;
+      const fatal = detail?.hlsFatal ?? null;
       setLoading(false);
-      setDiagnostics((current) => ({ ...current, hlsType: type, hlsDetails: details, hlsStatus: status, hlsUrl }));
+      setDiagnostics((current) => ({ ...current, hlsType: type, hlsDetails: details, hlsStatus: status, hlsUrl, hlsFatal: fatal }));
       const reason = getPlaybackFailureReason({
         sourceType: detectSourceType(video.video_url, probe?.contentType),
         httpStatus: probe?.status ?? null,
@@ -95,7 +98,7 @@ function VideoPlayer({ video }: { video: VideoRecord }) {
         hlsStatus: status,
       });
       setFailure(reason);
-      if (process.env.NODE_ENV === "development") console.error("[video-playback] failed", { sourceHost: host, sourceType: detectSourceType(video.video_url, probe?.contentType), httpStatus: status ?? probe?.status ?? null, contentType: probe?.contentType ?? null, hlsType: type, hlsDetails: details, hlsStatus: status, reason });
+      if (process.env.NODE_ENV === "development") console.error("[video-playback] failed", { originalVideoUrl: video.video_url, pageOrigin: window.location.origin, sourceHost: host, sourceType: detectSourceType(video.video_url, probe?.contentType), httpStatus: status ?? probe?.status ?? null, contentType: probe?.contentType ?? null, hlsType: type, hlsDetails: details, hlsStatus: status, hlsFatal: fatal, hlsUrl, hlsLifecycle: { ...hlsLifecycle }, reason });
     };
 
     element.pause();
@@ -113,38 +116,65 @@ function VideoPlayer({ video }: { video: VideoRecord }) {
         setSourceType(type);
         setDiagnostics((current) => ({ ...current, sourceType: type }));
         if (type === "hls") {
-          if (element.canPlayType("application/vnd.apple.mpegurl")) {
+          const nativeHls = supportsNativeHls(element);
+          if (nativeHls) {
             element.src = video.video_url;
             element.load();
           } else {
             const HlsPlayer = (await import("hls.js")).default;
             if (!active) return;
-            if (!HlsPlayer.isSupported()) { fail({ hlsType: "unsupported", hlsDetails: "HLS is not supported by this browser" }); return; }
-            hls = new HlsPlayer({ enableWorker: true, lowLatencyMode: false });
+            const hlsSupported = HlsPlayer.isSupported();
+            const nativeSupport = element.canPlayType("application/vnd.apple.mpegurl");
+            if (process.env.NODE_ENV === "development") console.info("[video-playback] HLS capability", { originalVideoUrl: video.video_url, pageOrigin: window.location.origin, userAgent: navigator.userAgent, hlsSupported, canPlayType: nativeSupport, nativeHlsSelected: nativeHls });
+            if (!hlsSupported) { fail({ hlsType: "unsupported", hlsDetails: "Hls.js reports MediaSource is unsupported in this browser", hlsFatal: true }); return; }
+            if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
+            const hls = new HlsPlayer({ enableWorker: true, lowLatencyMode: false });
+            hlsRef.current = hls;
             hlsManagedRef.current = true;
-            hls.on(HlsPlayer.Events.MEDIA_ATTACHED, () => {
-              if (process.env.NODE_ENV === "development") console.info("[video-playback] HLS media attached", { sourceHost: host });
+            hls.on(HlsPlayer.Events.MEDIA_ATTACHED, (_event, data) => {
+              hlsLifecycle.mediaAttached = true;
+              if (process.env.NODE_ENV === "development") console.info("[HLS MEDIA_ATTACHED]", { source: host, originalVideoUrl: video.video_url, pageOrigin: window.location.origin, data });
             });
-            hls.on(HlsPlayer.Events.MANIFEST_PARSED, () => {
+            hls.on(HlsPlayer.Events.MANIFEST_LOADING, (_event, data) => {
+              hlsLifecycle.manifestLoading = true;
+              if (process.env.NODE_ENV === "development") console.info("[HLS MANIFEST_LOADING]", { source: host, url: data.url, originalVideoUrl: video.video_url, pageOrigin: window.location.origin });
+            });
+            hls.on(HlsPlayer.Events.MANIFEST_LOADED, (_event, data) => {
+              hlsLifecycle.manifestLoaded = true;
+              if (process.env.NODE_ENV === "development") console.info("[HLS MANIFEST_LOADED]", { source: host, url: data.url, levels: data.levels?.length ?? 0, originalVideoUrl: video.video_url, pageOrigin: window.location.origin });
+            });
+            hls.on(HlsPlayer.Events.MANIFEST_PARSED, (_event, data) => {
+              hlsLifecycle.manifestParsed = true;
               if (!active) return;
               setLoading(false);
-              if (process.env.NODE_ENV === "development") console.info("[video-playback] HLS manifest parsed", { sourceHost: host });
+              if (process.env.NODE_ENV === "development") console.info("[HLS MANIFEST_PARSED]", { source: host, originalVideoUrl: video.video_url, pageOrigin: window.location.origin, levels: data.levels?.length ?? 0 });
               void element.play().catch((error: unknown) => {
                 if (process.env.NODE_ENV === "development") console.info("[video-playback] autoplay not allowed; native controls remain available", error instanceof Error ? error.message : error);
               });
             });
+            hls.on(HlsPlayer.Events.FRAG_LOADING, (_event, data) => {
+              hlsLifecycle.fragLoading = true;
+              if (process.env.NODE_ENV === "development") console.info("[HLS FRAG_LOADING]", { source: host, url: data.frag.url, level: data.frag.level, sn: data.frag.sn, pageOrigin: window.location.origin });
+            });
+            hls.on(HlsPlayer.Events.FRAG_LOADED, (_event, data) => {
+              hlsLifecycle.fragLoaded = true;
+              const loaded = data as typeof data & { stats?: { loaded?: number } };
+              if (process.env.NODE_ENV === "development") console.info("[HLS FRAG_LOADED]", { source: host, url: data.frag.url, level: data.frag.level, sn: data.frag.sn, loadedBytes: loaded.stats?.loaded ?? null, pageOrigin: window.location.origin });
+            });
             hls.on(HlsPlayer.Events.ERROR, (_event, data) => {
               const status = data.response?.code ?? null;
               const actualUrl = data.url ?? data.response?.url ?? null;
-              const detail = { hlsType: String(data.type), hlsDetails: String(data.details), hlsStatus: status, hlsUrl: actualUrl };
+              const detail = { hlsType: String(data.type), hlsDetails: String(data.details), hlsStatus: status, hlsUrl: actualUrl, hlsFatal: data.fatal };
               if (process.env.NODE_ENV === "development") {
                 const websiteRequest = status === 401 || status === 403 ? `Blocked (HTTP ${status})` : (status === 0 || status === null) && String(data.type).toLowerCase().includes("network") ? "Blocked (CORS/network; no HTTP status exposed)" : data.fatal ? "Failed" : "Recoverable/nonfatal";
-                console[data.fatal ? "error" : "warn"]("[video-playback] HLS diagnostics", { source: host, format: "HLS", directBrowser: playbackReportedRef.current ? "Playable before failure" : "Not confirmed in this page", websiteHlsRequest: websiteRequest, fatal: data.fatal, details: data.details, httpStatus: status, url: actualUrl, error: data.error?.message ?? null });
+                console[data.fatal ? "error" : "warn"]("[HLS ERROR]", { originalVideoUrl: video.video_url, pageOrigin: window.location.origin, hlsSupported, nativeHlsSupport: nativeSupport, source: host, format: "HLS", directBrowser: playbackReportedRef.current ? "Playable before failure" : "Not confirmed in this page", websiteHlsRequest: websiteRequest, lifecycle: { ...hlsLifecycle }, type: data.type, details: data.details, fatal: data.fatal, url: data.url, response: data.response, responseCode: data.response?.code, reason: data.reason, error: data.error, hlsInstanceUrl: actualUrl });
               }
               if (data.fatal) fail(detail);
             });
             hls.loadSource(video.video_url);
             hls.attachMedia(element);
+            hlsLifecycle.attachMediaCalled = true;
+            if (process.env.NODE_ENV === "development") console.info("[video-playback] hls.attachMedia() returned", { source: host, originalVideoUrl: video.video_url, pageOrigin: window.location.origin, attachMediaCalled: true, mediaAttachedEvent: hlsLifecycle.mediaAttached });
           }
         } else if (type === "dash") {
           const dashModule = await import("dashjs");
@@ -167,10 +197,10 @@ function VideoPlayer({ video }: { video: VideoRecord }) {
       } catch (error) {
         const details = error instanceof Error ? error.message : "Player initialization failed";
         if (process.env.NODE_ENV === "development") console.error("[video-playback] player initialization failed", { sourceHost: host, sourceType: resolvedType, error: details });
-        fail({ hlsType: "player initialization", hlsDetails: details });
+        fail({ hlsType: "player initialization", hlsDetails: details, hlsFatal: true });
       }
     })();
-    return () => { active = false; hlsManagedRef.current = false; hls?.destroy(); dash?.reset(); element.pause(); element.removeAttribute("src"); element.load(); };
+    return () => { active = false; hlsManagedRef.current = false; if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; } dash?.reset(); element.pause(); element.removeAttribute("src"); element.load(); };
   }, [video.video_url, attempt]);
 
   function handleMediaError(event: React.SyntheticEvent<HTMLVideoElement>) {
@@ -201,6 +231,8 @@ function VideoPlayer({ video }: { video: VideoRecord }) {
     diagnostics.hlsStatus !== null ? `Media HTTP status: ${diagnostics.hlsStatus}` : diagnostics.status !== null ? `Metadata HTTP status: ${diagnostics.status}` : null,
     diagnostics.contentType ? `Content-Type: ${diagnostics.contentType}` : null,
     diagnostics.hlsDetails ? `Player detail: ${diagnostics.hlsDetails}` : null,
+    process.env.NODE_ENV === "development" && diagnostics.hlsFatal !== null ? `Fatal: ${diagnostics.hlsFatal}` : null,
+    process.env.NODE_ENV === "development" && diagnostics.hlsUrl ? `URL: ${diagnostics.hlsUrl}` : null,
   ].filter(Boolean);
   return <div className="player-frame" data-source-type={sourceType}>
     <video ref={videoRef} controls autoPlay playsInline preload="metadata" poster={video.thumbnail_url || undefined} onLoadedMetadata={() => setLoading(false)} onCanPlay={() => setLoading(false)} onPlaying={handlePlaybackStarted} onWaiting={() => setLoading(true)} onError={handleMediaError}/>

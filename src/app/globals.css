@@ -404,7 +404,7 @@ nextjs-portal {
   .reel-poster-wrap { position: absolute; inset: 0; width: 100%; height: 100%; }
   .reel-poster { object-fit: cover; }
   .reel-poster-play { display: none; }
-  .reel-caption { position: absolute; z-index: 2; right: 16px; bottom: calc(env(safe-area-inset-bottom,0px) + 148px); left: 16px; padding: 0; }
+  .reel-caption { position: absolute; z-index: 2; right: 16px; bottom: calc(env(safe-area-inset-bottom,0px) + 80px); left: 16px; padding: 0; }
   .reel-caption h1 { display: -webkit-box; overflow: hidden; font-size: 15px; line-height: 1.35; text-overflow: ellipsis; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
   .reel-view-count { margin-top: 5px; color: rgba(255,255,255,.84); font-size: 11px; }
   .reel-caption p,.reels-page .player-hint { display: none; }

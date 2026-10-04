@@ -20,6 +20,7 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
+  const [mobileViewport, setMobileViewport] = useState<boolean | null>(null);
   const trackRef = useRef<HTMLDivElement>(null);
   const loadingRef = useRef(false);
 
@@ -46,6 +47,14 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
   }, [slug]);
 
   useEffect(() => { void loadPage(1, true); }, [loadPage]);
+
+  useEffect(() => {
+    const breakpoint = window.matchMedia("(max-width: 720px)");
+    const update = () => setMobileViewport(breakpoint.matches);
+    update();
+    breakpoint.addEventListener("change", update);
+    return () => breakpoint.removeEventListener("change", update);
+  }, []);
 
   useEffect(() => {
     const root = trackRef.current;
@@ -87,8 +96,8 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
             {videos.map((item, index) => <article className="reel-slide" data-reel-index={index} key={item.video.id} aria-label={`Video ${index + 1}: ${item.video.title}`}>
               <div className="reel-card">
                 <div className="reel-media">
-                  {activeIndex === index
-                    ? <VideoPlayer video={item.video} playbackUrl={item.playbackUrl} playbackType={item.playbackType} sourceHost={item.sourceHost} muted/>
+                  {activeIndex === index && mobileViewport !== null
+                    ? <VideoPlayer video={item.video} playbackUrl={item.playbackUrl} playbackType={item.playbackType} sourceHost={item.sourceHost} muted controls={!mobileViewport}/>
                     : <div className="reel-poster-wrap"><img className="reel-poster" loading="lazy" src={item.video.thumbnail_url || "/film-placeholder.svg"} alt=""/><span className="reel-poster-play"><Play size={20} fill="currentColor"/></span></div>}
                 </div>
                 <div className="reel-caption"><h1>{item.video.title}</h1><PublicViewCount count={item.displayViews} className="reel-view-count"/>{item.video.description && <p>{item.video.description}</p>}</div>

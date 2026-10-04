@@ -9,13 +9,14 @@ import type { SourceProbe, VideoSourceType } from "@/lib/video-playback";
 
 type WatchVideo = Omit<VideoRecord, "video_url" | "views" | "display_view_count" | "published_at">;
 
-export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onViewCounted, muted = false }: {
+export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onViewCounted, muted = false, controls = true }: {
   video: WatchVideo;
   playbackUrl: string;
   playbackType: VideoSourceType;
   sourceHost: string;
   onViewCounted?: () => void;
   muted?: boolean;
+  controls?: boolean;
 }) {
   const [failure, setFailure] = useState("");
   const [loading, setLoading] = useState(true);
@@ -134,5 +135,5 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
     }
   }
   const diagnosticLines = [`Source: ${sourceHost}`, `Format: ${sourceType.toUpperCase()}`, diagnostics.hlsStatus !== null ? `HTTP status: ${diagnostics.hlsStatus}` : null, diagnostics.hlsType ? `Player category: ${diagnostics.hlsType}` : null];
-  return <div className="player-frame" data-source-type={sourceType}><video ref={videoRef} controls autoPlay playsInline muted={muted} preload="metadata" poster={video.thumbnail_url || undefined} onLoadedMetadata={(event) => { const element = event.currentTarget; if (element.closest(".reel-media") && element.videoWidth && element.videoHeight) element.dataset.reelOrientation = element.videoHeight > element.videoWidth ? "portrait" : "landscape"; setLoading(false); }} onCanPlay={() => setLoading(false)} onPlaying={handlePlaybackStarted} onWaiting={() => setLoading(true)} onError={handleMediaError}/>{loading && !failure && <div className="player-loading"><span className="spinner"/><span>Loading video...</span></div>}{failure && <div className="player-error"><Film size={24}/><strong>Unable to play this video</strong><span className="player-reason">{failure}</span><span className="player-diagnostics">{diagnosticLines.join(" · ")}</span><button type="button" onClick={() => { setFailure(""); setAttempt((current) => current + 1); }}>Try again</button></div>}<span className="player-hint"><Command size={12}/> SPACE TO PLAY</span></div>;
+  return <div className="player-frame" data-source-type={sourceType}><video ref={videoRef} controls={controls} autoPlay playsInline muted={muted} preload="metadata" poster={video.thumbnail_url || undefined} onLoadedMetadata={(event) => { const element = event.currentTarget; if (element.closest(".reel-media") && element.videoWidth && element.videoHeight) element.dataset.reelOrientation = element.videoHeight > element.videoWidth ? "portrait" : "landscape"; setLoading(false); }} onCanPlay={() => setLoading(false)} onPlaying={handlePlaybackStarted} onWaiting={() => setLoading(true)} onError={handleMediaError}/>{loading && !failure && <div className="player-loading"><span className="spinner"/><span>Loading video...</span></div>}{failure && <div className="player-error"><Film size={24}/><strong>Unable to play this video</strong><span className="player-reason">{failure}</span><span className="player-diagnostics">{diagnosticLines.join(" · ")}</span><button type="button" onClick={() => { setFailure(""); setAttempt((current) => current + 1); }}>Try again</button></div>}<span className="player-hint"><Command size={12}/> SPACE TO PLAY</span></div>;
 }

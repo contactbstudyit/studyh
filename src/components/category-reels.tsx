@@ -82,7 +82,7 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
               <div className="reel-card">
                 <div className="reel-media">
                   {activeIndex === index
-                    ? <VideoPlayer video={item.video} playbackUrl={item.playbackUrl} playbackType={item.playbackType} sourceHost={item.sourceHost}/>
+                    ? <VideoPlayer video={item.video} playbackUrl={item.playbackUrl} playbackType={item.playbackType} sourceHost={item.sourceHost} muted/>
                     : <div className="reel-poster-wrap"><img className="reel-poster" loading="lazy" src={item.video.thumbnail_url || "/film-placeholder.svg"} alt=""/><span className="reel-poster-play"><Play size={20} fill="currentColor"/></span></div>}
                 </div>
                 <div className="reel-caption"><h1>{item.video.title}</h1><PublicViewCount count={item.displayViews} className="reel-view-count"/>{item.video.description && <p>{item.video.description}</p>}</div>

@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getAdminMfaStatus, hasAdminTotpAal2 } from "@/lib/admin-mfa";
 import AdminDashboard from "./dashboard-client";
 
 export const dynamic = "force-dynamic";
@@ -31,5 +32,9 @@ export default async function AdminPage() {
     });
     redirect("/");
   }
+
+  const mfaStatus = await getAdminMfaStatus(supabase);
+  if (mfaStatus.error || !hasAdminTotpAal2(mfaStatus)) redirect("/admin/login/mfa");
+
   return <AdminDashboard />;
 }

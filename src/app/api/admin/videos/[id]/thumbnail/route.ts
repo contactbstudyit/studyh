@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { deleteGeneratedThumbnail, isGeneratedR2Thumbnail, saveGeneratedThumbnail } from "@/lib/r2-storage";
+import { getAdminMfaStatus, hasAdminTotpAal2 } from "@/lib/admin-mfa";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,6 +15,8 @@ async function getAdminClient() {
   const { data: membership, error: membershipError } = await supabase.from("admins").select("user_id").eq("user_id", user.id).maybeSingle();
   if (membershipError) return { client: null, error: `Admin authorization failed: ${membershipError.message}`, status: 403 };
   if (!membership) return { client: null, error: "Admin authorization required", status: 403 };
+  const mfaStatus = await getAdminMfaStatus(supabase);
+  if (mfaStatus.error || !hasAdminTotpAal2(mfaStatus)) return { client: null, error: "Authenticator verification required", status: 403 };
   return { client: supabase, error: null, status: 200 };
 }
 

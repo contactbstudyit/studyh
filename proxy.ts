@@ -48,10 +48,7 @@ export async function proxy(request: NextRequest) {
         projectHost: new URL(url).host,
         userId,
         table: 'public.admins',
-        message: error.message,
         code: error.code,
-        details: error.details,
-        hint: error.hint,
       })
       return redirectTo('/admin/login', { membershipCheck: 'failed' })
     }
@@ -62,7 +59,7 @@ export async function proxy(request: NextRequest) {
         table: 'public.admins',
         result: membership,
       })
-      return redirectTo('/')
+      return redirectTo('/admin/login')
     }
 
     const mfaStatus = await getAdminMfaStatus(supabase)

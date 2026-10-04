@@ -16,10 +16,7 @@ export default async function AdminPage() {
       projectHost: new URL(process.env.NEXT_PUBLIC_SUPABASE_URL!).host,
       userId: claims.sub,
       table: "public.admins",
-      message: error.message,
       code: error.code,
-      details: error.details,
-      hint: error.hint,
     });
     redirect("/admin/login?membershipCheck=failed");
   }
@@ -30,7 +27,7 @@ export default async function AdminPage() {
       table: "public.admins",
       result: membership,
     });
-    redirect("/");
+    redirect("/admin/login");
   }
 
   const mfaStatus = await getAdminMfaStatus(supabase);

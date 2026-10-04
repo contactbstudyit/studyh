@@ -75,7 +75,7 @@ export default function AdminTotpMfa({ mode, factors }: { mode: "challenge" | "e
         .maybeSingle();
       if (membershipError || !membership) {
         await client.auth.signOut({ scope: "local" });
-        setError("Admin access could not be verified. Sign in again.");
+        setError("Verification code is incorrect or expired. Check your authenticator and try again.");
         return;
       }
 

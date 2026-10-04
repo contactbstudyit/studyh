@@ -2,6 +2,7 @@ import { DeleteObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client
 import { randomUUID } from "node:crypto";
 
 type R2Configuration = { client: S3Client; bucket: string; publicBaseUrl: URL };
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 let cachedClient: { key: string; client: S3Client } | null = null;
 
 function getConfiguration(): R2Configuration {
@@ -58,30 +59,30 @@ export async function saveGeneratedThumbnail(videoId: string, body: Buffer, cont
 }
 
 export function isGeneratedR2Thumbnail(videoId: string, thumbnailUrl: string | null | undefined) {
+  return getGeneratedThumbnailKey(videoId, thumbnailUrl) !== null;
+}
+
+function getGeneratedThumbnailKey(videoId: string, thumbnailUrl: string | null | undefined) {
   const publicBase = process.env.CLOUDFLARE_R2_PUBLIC_URL || process.env.CLOUDFLARE_R2_PUBLIC_BASE_URL;
-  if (!publicBase || !thumbnailUrl) return false;
+  if (!publicBase || !thumbnailUrl || !UUID_PATTERN.test(videoId)) return null;
   try {
     const base = new URL(publicBase);
     const url = new URL(thumbnailUrl);
-    const prefix = `${base.pathname.replace(/\/$/, "")}/video-thumbnails/${videoId}/`;
-    return url.origin === base.origin && decodeURIComponent(url.pathname).startsWith(prefix);
-  } catch { return false; }
+    if (base.protocol !== "https:" || base.username || base.password || base.search || base.hash ||
+      url.protocol !== "https:" || url.origin !== base.origin || url.username || url.password || url.search || url.hash) return null;
+    const basePath = base.pathname.replace(/\/$/, "");
+    const pathname = decodeURIComponent(url.pathname);
+    const prefix = `${basePath}/video-thumbnails/${videoId}/`;
+    if (!pathname.startsWith(prefix)) return null;
+    const key = pathname.slice(basePath.length + 1);
+    const objectPattern = new RegExp(`^video-thumbnails/${videoId}/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\\.(?:jpg|webp)$`, "i");
+    return objectPattern.test(key) ? key : null;
+  } catch { return null; }
 }
 
 export async function deleteGeneratedThumbnail(videoId: string, thumbnailUrl: string) {
-  const publicBase = process.env.CLOUDFLARE_R2_PUBLIC_URL || process.env.CLOUDFLARE_R2_PUBLIC_BASE_URL;
-  if (!publicBase) return false;
-  let url: URL;
-  let baseUrl: URL;
-  try { baseUrl = new URL(publicBase); } catch { return false; }
-  try { url = new URL(thumbnailUrl); } catch { return false; }
-  if (url.origin !== baseUrl.origin) return false;
-  const basePath = baseUrl.pathname.replace(/\/$/, "");
-  const pathname = decodeURIComponent(url.pathname);
-  const prefix = `${basePath}/video-thumbnails/${videoId}/`;
-  if (!pathname.startsWith(prefix)) return false;
-  const key = pathname.slice(basePath.length + 1);
-  if (!key || key.includes("..") || key.includes("\\")) throw new Error("Invalid generated thumbnail object key");
+  const key = getGeneratedThumbnailKey(videoId, thumbnailUrl);
+  if (!key) return false;
   const config = getConfiguration();
   await config.client.send(new DeleteObjectCommand({ Bucket: config.bucket, Key: key }));
   return true;

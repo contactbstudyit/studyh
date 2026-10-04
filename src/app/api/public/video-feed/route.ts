@@ -97,8 +97,8 @@ export async function GET(request: NextRequest) {
     };
     return NextResponse.json(response, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not generate video feed";
-    if (process.env.NODE_ENV === "development") console.error("[public-video-feed] query failed", { categoryId, search, page, message });
-    return NextResponse.json({ error: message }, { status: 500, headers: { "Cache-Control": "no-store" } });
+    const code = error && typeof error === "object" && "code" in error ? error.code : null;
+    if (process.env.NODE_ENV === "development") console.error("[public-video-feed] query failed", { categoryId, page, code });
+    return NextResponse.json({ error: "Could not load videos" }, { status: 500, headers: { "Cache-Control": "no-store" } });
   }
 }

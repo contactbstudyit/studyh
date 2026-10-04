@@ -23,7 +23,7 @@ type ResolvedAddress = { address: string; family: 4 | 6 };
 type UpstreamResult = { response: IncomingMessage; finalUrl: URL };
 
 function getSigningSecret() {
-  const secret = process.env.MEDIA_PROXY_SECRET || process.env.SUPABASE_ACCESS_TOKEN;
+  const secret = process.env.MEDIA_PROXY_SECRET;
   return secret ? Buffer.from(secret, "utf8") : null;
 }
 
@@ -348,8 +348,7 @@ async function relay(request: NextRequest) {
     }
     return new Response(Readable.toWeb(response) as ReadableStream, { status, headers });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "External media relay failed";
-    if (process.env.NODE_ENV === "development") console.error("[media-proxy] relay failed", { sourceHost: sourceUrl.host, targetHost: targetUrl.host, message });
-    return errorResponse(request, message, 502);
+    if (process.env.NODE_ENV === "development") console.error("[media-proxy] relay failed", { sourceHost: sourceUrl.host, targetHost: targetUrl.host, errorType: error instanceof Error ? error.name : "UnknownError" });
+    return errorResponse(request, "External media relay failed", 502);
   }
 }

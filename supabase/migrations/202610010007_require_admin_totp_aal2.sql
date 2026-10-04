@@ -115,3 +115,6 @@ begin
     (select coalesce(sum(v.views), 0)::bigint from public.videos as v);
 end;
 $$;
+
+revoke all on function public.library_dashboard_stats() from public, anon;
+grant execute on function public.library_dashboard_stats() to authenticated;

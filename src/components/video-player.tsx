@@ -55,7 +55,7 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
       const reason = getPlaybackFailureReason({ sourceType: resolvedType, httpStatus: hlsStatus ?? probe?.status ?? null, probeError: probe?.error ?? null, hlsType, hlsDetails, hlsStatus });
       setDiagnostics((current) => ({ ...current, hlsType, hlsDetails, hlsStatus }));
       setFailure(reason); setLoading(false);
-      if (process.env.NODE_ENV === "development") console.error("[video-playback] secure relay failed", { sourceHost, playbackType: resolvedType, pageOrigin: window.location.origin, ...detail, reason, lifecycle: { ...lifecycle } });
+      if (process.env.NODE_ENV === "development") console.error("[video-playback] secure relay failed", { sourceHost, playbackType: resolvedType, pageOrigin: window.location.origin, failureType: hlsType, status: hlsStatus, reason, lifecycle: { ...lifecycle } });
     };
 
     element.pause(); element.removeAttribute("src"); element.load();
@@ -86,7 +86,7 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
             if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
             const hls = new HlsPlayer({ enableWorker: true, lowLatencyMode: false });
             hlsRef.current = hls; hlsManagedRef.current = true;
-            hls.on(HlsPlayer.Events.MEDIA_ATTACHED, (_event, data) => { lifecycle.mediaAttached = true; if (process.env.NODE_ENV === "development") console.info("[HLS MEDIA_ATTACHED]", { sourceHost, data }); });
+            hls.on(HlsPlayer.Events.MEDIA_ATTACHED, () => { lifecycle.mediaAttached = true; if (process.env.NODE_ENV === "development") console.info("[HLS MEDIA_ATTACHED]", { sourceHost, attached: true }); });
             hls.on(HlsPlayer.Events.MANIFEST_LOADING, () => { lifecycle.manifestLoading = true; if (process.env.NODE_ENV === "development") console.info("[HLS MANIFEST_LOADING]", { sourceHost, request: "same-origin relay" }); });
             hls.on(HlsPlayer.Events.MANIFEST_LOADED, (_event, data) => { lifecycle.manifestLoaded = true; if (process.env.NODE_ENV === "development") console.info("[HLS MANIFEST_LOADED]", { sourceHost, levels: data.levels?.length ?? 0 }); });
             hls.on(HlsPlayer.Events.MANIFEST_PARSED, (_event, data) => { lifecycle.manifestParsed = true; if (!active) return; setLoading(false); if (process.env.NODE_ENV === "development") console.info("[HLS MANIFEST_PARSED]", { sourceHost, levels: data.levels?.length ?? 0 }); void element.play().catch(() => {}); });
@@ -94,7 +94,7 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
             hls.on(HlsPlayer.Events.FRAG_LOADED, (_event, data) => { lifecycle.fragLoaded = true; if (process.env.NODE_ENV === "development") console.info("[HLS FRAG_LOADED]", { sourceHost, level: data.frag.level, sequence: data.frag.sn }); });
             hls.on(HlsPlayer.Events.ERROR, (_event, data) => {
               const detail = { type: String(data.type), details: String(data.details), status: data.response?.code ?? null };
-              if (process.env.NODE_ENV === "development") console[data.fatal ? "error" : "warn"]("[HLS ERROR]", { sourceHost, pageOrigin: window.location.origin, ...detail, fatal: data.fatal, relayUrl: "[opaque same-origin playback token]", response: data.response, reason: data.reason, error: data.error, lifecycle: { ...lifecycle } });
+              if (process.env.NODE_ENV === "development") console[data.fatal ? "error" : "warn"]("[HLS ERROR]", { sourceHost, pageOrigin: window.location.origin, type: detail.type, status: detail.status, fatal: data.fatal, lifecycle: { ...lifecycle } });
               if (data.fatal) fail(detail);
             });
             hls.loadSource(playbackUrl); hls.attachMedia(element); lifecycle.attachMediaCalled = true;
@@ -121,7 +121,7 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
     if (sourceType === "hls" && hlsManagedRef.current) { if (process.env.NODE_ENV === "development") console.warn("[video-playback] media element error while hls.js is active; waiting for fatal HLS event", { sourceHost, mediaErrorCode }); return; }
     const reason = getPlaybackFailureReason({ sourceType, httpStatus: diagnostics.status, probeError: diagnostics.error, mediaErrorCode, hlsType: diagnostics.hlsType, hlsDetails: diagnostics.hlsDetails, hlsStatus: diagnostics.hlsStatus });
     setDiagnostics((current) => ({ ...current, mediaErrorCode })); setLoading(false); setFailure(reason);
-    if (process.env.NODE_ENV === "development") console.error("[video-playback] relay media error", { sourceHost, sourceType, mediaErrorCode, mediaErrorMessage: event.currentTarget.error?.message, reason });
+    if (process.env.NODE_ENV === "development") console.error("[video-playback] relay media error", { sourceHost, sourceType, mediaErrorCode, reason });
   }
 
   function handlePlaybackStarted() {
@@ -132,6 +132,6 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
       void recordPublicVideoView(video.id).then((counted) => { if (counted) onViewCounted?.(); });
     }
   }
-  const diagnosticLines = [`Source: ${sourceHost}`, `Format: ${sourceType.toUpperCase()}`, diagnostics.hlsStatus !== null ? `HTTP status: ${diagnostics.hlsStatus}` : null, diagnostics.hlsDetails ? `Player detail: ${diagnostics.hlsDetails}` : null];
+  const diagnosticLines = [`Source: ${sourceHost}`, `Format: ${sourceType.toUpperCase()}`, diagnostics.hlsStatus !== null ? `HTTP status: ${diagnostics.hlsStatus}` : null, diagnostics.hlsType ? `Player category: ${diagnostics.hlsType}` : null];
   return <div className="player-frame" data-source-type={sourceType}><video ref={videoRef} controls autoPlay playsInline preload="metadata" poster={video.thumbnail_url || undefined} onLoadedMetadata={() => setLoading(false)} onCanPlay={() => setLoading(false)} onPlaying={handlePlaybackStarted} onWaiting={() => setLoading(true)} onError={handleMediaError}/>{loading && !failure && <div className="player-loading"><span className="spinner"/><span>Loading video...</span></div>}{failure && <div className="player-error"><Film size={24}/><strong>Unable to play this video</strong><span className="player-reason">{failure}</span><span className="player-diagnostics">{diagnosticLines.join(" · ")}</span><button type="button" onClick={() => { setFailure(""); setAttempt((current) => current + 1); }}>Try again</button></div>}<span className="player-hint"><Command size={12}/> SPACE TO PLAY</span></div>;
 }

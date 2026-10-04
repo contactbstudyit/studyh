@@ -4,7 +4,7 @@ const ROOT_TOKEN_TTL_MS = 12 * 60 * 60 * 1000;
 const RESOURCE_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 
 function getSigningKey() {
-  const secret = process.env.MEDIA_PROXY_SECRET || process.env.SUPABASE_ACCESS_TOKEN;
+  const secret = process.env.MEDIA_PROXY_SECRET;
   if (!secret) throw new Error("Server-side media relay signing is not configured");
   return Buffer.from(secret, "utf8");
 }

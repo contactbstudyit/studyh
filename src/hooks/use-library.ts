@@ -44,9 +44,9 @@ export function useCategories() {
       setCategories(all);
       setErrorMessage("");
     } catch (error) {
-      const info = describeSupabaseError(error);
+      const info = "Could not load categories. Please try again.";
       setErrorMessage(info);
-      if (process.env.NODE_ENV === "development") console.error("[admin-categories] load failed", info);
+      if (process.env.NODE_ENV === "development") console.error("[admin-categories] load failed", { code: error && typeof error === "object" && "code" in error ? error.code : null });
       toast.error(`Could not load categories: ${info}`);
     }
     finally { setLoading(false); }
@@ -60,21 +60,20 @@ export function useCategories() {
       setCategories((old) => [...old, category].sort((a, b) => a.name.localeCompare(b.name)));
       setErrorMessage(""); toast.success("Category created"); return { category, error: null };
     } catch (error) {
-      const info = describeSupabaseError(error);
-      const message = error && typeof error === "object" && "code" in error && error.code === "23505" ? "A category with this name already exists." : info;
+      const message = error && typeof error === "object" && "code" in error && error.code === "23505" ? "A category with this name already exists." : "Could not create category. Please try again.";
       setErrorMessage(message);
-      if (process.env.NODE_ENV === "development") console.error("[admin-categories] create failed", info);
+      if (process.env.NODE_ENV === "development") console.error("[admin-categories] create failed", { code: error && typeof error === "object" && "code" in error ? error.code : null });
       toast.error(message);
       return { category: null, error: message };
     }
   }
   async function update(id: string, input: Partial<Pick<Category, "name" | "description" | "image_url">>) {
     try { const { data, error } = await createClient().from("categories").update({ ...input, updated_at: new Date().toISOString() }).eq("id", id).select().single(); if (error) throw error; setCategories((old) => old.map((item) => item.id === id ? data as Category : item).sort((a, b) => a.name.localeCompare(b.name))); setErrorMessage(""); toast.success("Category updated."); return true; }
-    catch (error) { const info = describeSupabaseError(error); const message = error && typeof error === "object" && "code" in error && error.code === "23505" ? "A category with this name already exists." : info; setErrorMessage(message); if (process.env.NODE_ENV === "development") console.error("[admin-categories] update failed", info); toast.error(message); return false; }
+    catch (error) { const message = error && typeof error === "object" && "code" in error && error.code === "23505" ? "A category with this name already exists." : "Could not update category. Please try again."; setErrorMessage(message); if (process.env.NODE_ENV === "development") console.error("[admin-categories] update failed", { code: error && typeof error === "object" && "code" in error ? error.code : null }); toast.error(message); return false; }
   }
   async function remove(id: string) {
     try { const { count, error: countError } = await createClient().from("videos").select("id", { count: "exact", head: true }).eq("category_id", id); if (countError) throw countError; if (count) { toast.error("Move or delete its videos before removing this category."); return false; } const { error } = await createClient().from("categories").delete().eq("id", id); if (error) throw error; setCategories((old) => old.filter((item) => item.id !== id)); toast.success("Category deleted."); return true; }
-    catch (error) { const info = describeSupabaseError(error); setErrorMessage(info); if (process.env.NODE_ENV === "development") console.error("[admin-categories] delete failed", info); toast.error(info); return false; }
+    catch (error) { const info = "Could not delete category. Please try again."; setErrorMessage(info); if (process.env.NODE_ENV === "development") console.error("[admin-categories] delete failed", { code: error && typeof error === "object" && "code" in error ? error.code : null }); toast.error(info); return false; }
   }
   return { categories, loading, errorMessage, setErrorMessage, refresh, create, update, remove };
 }
@@ -93,16 +92,15 @@ export function useCategoryOptions() {
       const client = createClient();
       const { data: authData, error: authError } = await client.auth.getUser();
       if (authError || !authData.user?.id) {
-        const authInfo = authError ? describeSupabaseError(authError) : "No authenticated user returned";
-        if (development) console.error("[admin-category-options] authenticated user lookup failed", { projectUrl, projectHost, userId: authData.user?.id ?? null, error: authInfo });
-        throw new Error(`Could not verify admin session before loading categories: ${authInfo}`);
+        if (development) console.error("[admin-category-options] authenticated user lookup failed", { projectHost, userId: authData.user?.id ?? null, code: authError?.code ?? null });
+        throw new Error("Could not verify the admin session. Please sign in again.");
       }
       const userId = authData.user.id;
       if (development) console.info("[admin-category-options] query started", { projectUrl, projectHost, userId, query: "categories.select(id,name).order(name, ascending)" });
       const all: CategoryOption[] = [];
       for (let offset = 0; ; offset += 500) {
         const { data, error: queryError } = await client.from("categories").select("id,name").order("name", { ascending: true }).range(offset, offset + 499);
-        if (development) console.info("[admin-category-options] query response", { userId, projectHost, offset, data, error: queryError ? { message: queryError.message, code: queryError.code, details: queryError.details, hint: queryError.hint } : null, count: data?.length ?? 0 });
+        if (development) console.info("[admin-category-options] query response", { userId, projectHost, offset, errorCode: queryError?.code ?? null, count: data?.length ?? 0 });
         if (queryError) throw queryError;
         all.push(...((data ?? []) as CategoryOption[]));
         if (!data || data.length < 500) break;
@@ -111,9 +109,9 @@ export function useCategoryOptions() {
       if (development) console.info("[admin-category-options] state update scheduled", { userId, projectHost, categories: all, count: all.length });
       return all;
     } catch (error) {
-      const info = describeSupabaseError(error);
+      const info = "Could not load categories. Please try again.";
       setError(info);
-      if (development) console.error("[admin-category-options] load failed", { projectUrl, projectHost, error: info });
+       if (development) console.error("[admin-category-options] load failed", { projectHost, errorCode: error && typeof error === "object" && "code" in error ? error.code : null });
       return null;
     } finally { setLoading(false); }
   }, []);
@@ -121,12 +119,6 @@ export function useCategoryOptions() {
     setCategories((old) => old.some((item) => item.id === category.id) ? old : [...old, category].sort((a, b) => a.name.localeCompare(b.name)));
   }
   return { categories, loading, error, refresh, add };
-}
-
-function describeSupabaseError(error: unknown) {
-  if (!error || typeof error !== "object") return String(error || "Unknown Supabase error");
-  const item = error as { message?: unknown; code?: unknown; details?: unknown; hint?: unknown };
-  return [item.message, item.code && `code=${String(item.code)}`, item.details && `details=${String(item.details)}`, item.hint && `hint=${String(item.hint)}`].filter(Boolean).join(" · ") || "Unknown Supabase error";
 }
 
 export function useLibraryStats() {
@@ -163,7 +155,7 @@ export function useLibraryStats() {
       };
       setDiagnostic(info);
       if (showDashboardStatsDiagnostics) {
-        console.error("[admin-dashboard-stats]", info);
+        console.error("[admin-dashboard-stats]", { phase: info.phase, code: info.code });
         toast.error("Dashboard statistics failed. See the diagnostic details on this page.");
       } else toast.error("Could not load dashboard statistics.");
     }
@@ -266,9 +258,8 @@ export function useVideos(options: { categoryId?: string; search?: string; searc
       }
       return [...found.values()];
     } catch (error) {
-      const detail = error && typeof error === "object" && "message" in error ? String(error.message) : String(error);
-      if (process.env.NODE_ENV === "development") console.error("[video-thumbnail] missing-video query failed", error);
-      toast.error(`Could not load videos missing thumbnails: ${detail}`);
+      if (process.env.NODE_ENV === "development") console.error("[video-thumbnail] missing-video query failed", { code: error && typeof error === "object" && "code" in error ? error.code : null });
+      toast.error("Could not load videos missing thumbnails. Please try again.");
       return null;
     }
   }
@@ -310,10 +301,10 @@ export function useRecommendedVideos(currentVideo: Pick<VideoRecord, "id" | "cat
       pageRef.current = page + 1;
     } catch (cause) {
       if (generation !== requestGeneration.current) return;
-      const detail = cause && typeof cause === "object" && "message" in cause ? String(cause.message) : String(cause);
-      setError(detail);
-      if (process.env.NODE_ENV === "development") console.error("[video-recommendations] load failed", { currentVideoId: currentVideo.id, categoryId: currentVideo.category_id, message: detail });
-      toast.error(`Could not load recommended videos: ${detail}`);
+      const message = "Could not load recommended videos. Please try again.";
+      setError(message);
+      if (process.env.NODE_ENV === "development") console.error("[video-recommendations] load failed", { currentVideoId: currentVideo.id, categoryId: currentVideo.category_id, errorType: cause instanceof Error ? cause.name : "UnknownError" });
+      toast.error(message);
     } finally {
       if (generation === requestGeneration.current) {
         requestLock.current = false;

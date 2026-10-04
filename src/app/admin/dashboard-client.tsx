@@ -130,18 +130,6 @@ export default function AdminDashboard() {
   }, [adminFiltersReady, section, videosHook.totalCount, adminTotalPages, videoPage]);
 
   useEffect(() => {
-    if (process.env.NODE_ENV === "development" && section === "Add Video") {
-      console.info("[admin-category-options] Add Video dropdown render", {
-        categoryCount: categoryOptionsHook.categories.length,
-        categoryIds: categoryOptionsHook.categories.map((category) => category.id),
-        selectedCategoryId,
-        loading: categoryOptionsHook.loading,
-        error: categoryOptionsHook.error || null,
-      });
-    }
-  }, [section, categoryOptionsHook.categories, categoryOptionsHook.loading, categoryOptionsHook.error, selectedCategoryId]);
-
-  useEffect(() => {
     if (!categoryDialog) return;
     const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") setCategoryDialog(false); };
     window.addEventListener("keydown", onKeyDown);
@@ -242,9 +230,8 @@ export default function AdminDashboard() {
       toast.success(`Thumbnail generated: ${video.title}`);
       return true;
     } catch (error) {
-      const detail = error instanceof Error ? error.message : "Unknown thumbnail error";
-      if (process.env.NODE_ENV === "development") console.error("[video-thumbnail] regeneration failed", { videoId: video.id, sourceHost: (() => { try { return new URL(video.video_url).host; } catch { return "invalid URL"; } })(), detail });
-      toast.error(`Thumbnail could not be generated for ${video.title}: ${detail}`);
+      if (process.env.NODE_ENV === "development") console.error("[video-thumbnail] regeneration failed", { videoId: video.id, sourceHost: (() => { try { return new URL(video.video_url).host; } catch { return "invalid URL"; } })(), errorType: error instanceof Error ? error.name : "UnknownError" });
+      toast.error(`Thumbnail could not be generated for ${video.title}. Try again or use a different source.`);
       return false;
     } finally {
       setGeneratingThumbnailIds((current) => { const next = new Set(current); next.delete(video.id); return next; });

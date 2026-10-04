@@ -13,7 +13,7 @@ async function getAdminClient() {
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) return { client: null, error: "Admin authentication required", status: 401 };
   const { data: membership, error: membershipError } = await supabase.from("admins").select("user_id").eq("user_id", user.id).maybeSingle();
-  if (membershipError) return { client: null, error: `Admin authorization failed: ${membershipError.message}`, status: 403 };
+  if (membershipError) return { client: null, error: "Admin authorization could not be verified", status: 403 };
   if (!membership) return { client: null, error: "Admin authorization required", status: 403 };
   const mfaStatus = await getAdminMfaStatus(supabase);
   if (mfaStatus.error || !hasAdminTotpAal2(mfaStatus)) return { client: null, error: "Authenticator verification required", status: 403 };
@@ -55,15 +55,14 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     }
     if (previousThumbnail && previousThumbnail !== stored.url) {
       await deleteGeneratedThumbnail(id, previousThumbnail).catch((error) => {
-        if (process.env.NODE_ENV === "development") console.warn("[video-thumbnail] previous generated object cleanup failed", { videoId: id, error: error instanceof Error ? error.message : "Unknown R2 error" });
+        if (process.env.NODE_ENV === "development") console.warn("[video-thumbnail] previous generated object cleanup failed", { videoId: id, errorType: error instanceof Error ? error.name : "UnknownError" });
       });
     }
     return NextResponse.json({ thumbnail_url: stored.url }, { status: 201, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Thumbnail could not be stored";
-    if (process.env.NODE_ENV === "development") console.error("[video-thumbnail] R2 upload failed", { videoId: id, message });
-    const missingStorage = message.includes("Persistent R2 thumbnail storage is not configured");
-    return NextResponse.json({ error: message }, { status: missingStorage ? 503 : 502, headers: { "Cache-Control": "no-store" } });
+    const missingStorage = error instanceof Error && error.message.includes("Persistent R2 thumbnail storage is not configured");
+    if (process.env.NODE_ENV === "development") console.error("[video-thumbnail] R2 upload failed", { videoId: id, errorType: error instanceof Error ? error.name : "UnknownError" });
+    return NextResponse.json({ error: missingStorage ? "Thumbnail storage is not configured" : "Thumbnail could not be saved" }, { status: missingStorage ? 503 : 502, headers: { "Cache-Control": "no-store" } });
   }
 }
 
@@ -79,8 +78,7 @@ export async function DELETE(_request: NextRequest, context: { params: Promise<{
     const deleted = video.thumbnail_url ? await deleteGeneratedThumbnail(id, video.thumbnail_url) : false;
     return NextResponse.json({ deleted }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Generated thumbnail could not be deleted";
-    if (process.env.NODE_ENV === "development") console.error("[video-thumbnail] R2 delete failed", { videoId: id, message });
-    return NextResponse.json({ error: message }, { status: 502, headers: { "Cache-Control": "no-store" } });
+    if (process.env.NODE_ENV === "development") console.error("[video-thumbnail] R2 delete failed", { videoId: id, errorType: error instanceof Error ? error.name : "UnknownError" });
+    return NextResponse.json({ error: "Generated thumbnail could not be deleted" }, { status: 502, headers: { "Cache-Control": "no-store" } });
   }
 }

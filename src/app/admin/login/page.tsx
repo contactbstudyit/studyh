@@ -10,6 +10,7 @@ export default function AdminLogin() {
   const router = useRouter();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const safeSignInError = "Unable to sign in. Check your credentials and try again.";
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError(""); setBusy(true);
     const form = new FormData(event.currentTarget);
@@ -18,7 +19,7 @@ export default function AdminLogin() {
       const email = String(form.get("email"));
       const { error: loginError } = await client.auth.signInWithPassword({ email, password: String(form.get("password")) });
       if (loginError) {
-        setError("Email or password is incorrect.");
+        setError(safeSignInError);
         return;
       }
 
@@ -26,28 +27,28 @@ export default function AdminLogin() {
       const user = userData.user;
       if (userError || !user?.id) {
         await client.auth.signOut({ scope: "local" });
-        setError("Unable to verify this sign-in. Please try again.");
+        setError(safeSignInError);
         return;
       }
 
       const { data: membership, error: memberError } = await client.from("admins").select("user_id").eq("user_id", user.id).maybeSingle();
       if (memberError || !membership) {
         await client.auth.signOut({ scope: "local" });
-        setError("Unable to sign in to the admin area.");
+        setError(safeSignInError);
         return;
       }
 
       const mfaStatus = await getAdminMfaStatus(client);
       if (mfaStatus.error) {
         await client.auth.signOut({ scope: "local" });
-        setError("Unable to verify admin security requirements. Please try again.");
+        setError(safeSignInError);
         return;
       }
 
       router.replace(hasAdminTotpAal2(mfaStatus) ? "/admin" : "/admin/login/mfa");
       router.refresh();
     } catch {
-      setError("Unable to sign in. Check your credentials and try again.");
+      setError(safeSignInError);
     }
     finally { setBusy(false); }
   }

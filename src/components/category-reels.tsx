@@ -1,0 +1,96 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ArrowLeft, Clapperboard, Play } from "lucide-react";
+import Link from "next/link";
+import { VideoPlayer } from "@/components/video-player";
+import type { VideoRecord } from "@/hooks/use-library";
+import PublicViewCount from "@/components/public-view-count";
+import type { VideoSourceType } from "@/lib/video-playback";
+
+type ReelVideo = Omit<VideoRecord, "video_url" | "views" | "display_view_count" | "published_at" | "display_views">;
+type ReelItem = { video: ReelVideo; playbackUrl: string; playbackType: VideoSourceType; sourceHost: string; displayViews: number };
+type ReelResponse = { videos: ReelItem[]; page: number; pageSize: number; hasMore: boolean; error?: string };
+
+export default function CategoryReels({ slug, categoryName }: { slug: string; categoryName: string }) {
+  const [videos, setVideos] = useState<ReelItem[]>([]);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState("");
+  const trackRef = useRef<HTMLDivElement>(null);
+  const loadingRef = useRef(false);
+
+  const loadPage = useCallback(async (nextPage: number, replace = false) => {
+    if (loadingRef.current) return;
+    loadingRef.current = true;
+    setError("");
+    if (replace) setLoading(true); else setLoadingMore(true);
+    try {
+      const response = await fetch(`/api/public/category-reels/${encodeURIComponent(slug)}?page=${nextPage}`, { cache: "no-store" });
+      const payload = await response.json() as ReelResponse;
+      if (!response.ok) throw new Error("Could not load category reels.");
+      setVideos((current) => replace ? payload.videos : [...current, ...payload.videos]);
+      setPage(payload.page);
+      setHasMore(payload.hasMore);
+      if (replace) setActiveIndex(0);
+    } catch {
+      setError(replace ? "Could not load reels. Check your connection and try again." : "Could not load more reels. Try again.");
+    } finally {
+      loadingRef.current = false;
+      setLoading(false);
+      setLoadingMore(false);
+    }
+  }, [slug]);
+
+  useEffect(() => { void loadPage(1, true); }, [loadPage]);
+
+  useEffect(() => {
+    const root = trackRef.current;
+    if (!root || videos.length === 0) return;
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting && entry.intersectionRatio >= 0.6) {
+          const index = Number((entry.target as HTMLElement).dataset.reelIndex);
+          if (Number.isInteger(index)) setActiveIndex(index);
+        }
+      }
+    }, { root, threshold: [0.6, 0.8] });
+    root.querySelectorAll<HTMLElement>("[data-reel-index]").forEach((slide) => observer.observe(slide));
+    return () => observer.disconnect();
+  }, [videos.length]);
+
+  useEffect(() => {
+    if (videos.length > 0 && activeIndex >= videos.length - 2 && hasMore && !loadingMore && !error) {
+      void loadPage(page + 1);
+    }
+  }, [activeIndex, error, hasMore, loadPage, loadingMore, page, videos.length]);
+
+  return <main className="site-shell reels-page">
+    <header className="topbar category-topbar reels-topbar">
+      <Link className="reels-back" href={`/category/${encodeURIComponent(slug)}`} aria-label={`Back to ${categoryName} videos`}><ArrowLeft size={17}/></Link>
+      <span className="reels-header-label"><Clapperboard size={14}/> Reels</span>
+    </header>
+
+    {loading && videos.length === 0 ? <div className="reels-loading" role="status" aria-label={`Loading ${categoryName} reels`}><span className="spinner"/><span>Loading reels...</span></div>
+      : error && videos.length === 0 ? <section className="reels-empty" role="alert"><strong>Could not load reels</strong><span>{error}</span><button className="button-secondary" type="button" onClick={() => void loadPage(1, true)}>Try again</button></section>
+        : videos.length === 0 ? <section className="reels-empty"><Clapperboard size={22}/><strong>No videos in this category yet</strong><span>Check back later for new reels.</span><Link href={`/category/${encodeURIComponent(slug)}`}>Back to category</Link></section>
+          : <div className="reels-track" ref={trackRef} aria-label={`${categoryName} reels`}>
+            {videos.map((item, index) => <article className="reel-slide" data-reel-index={index} key={item.video.id} aria-label={`Video ${index + 1}: ${item.video.title}`}>
+              <div className="reel-card">
+                <div className="reel-media">
+                  {activeIndex === index
+                    ? <VideoPlayer video={item.video} playbackUrl={item.playbackUrl} playbackType={item.playbackType} sourceHost={item.sourceHost}/>
+                    : <div className="reel-poster-wrap"><img className="reel-poster" loading="lazy" src={item.video.thumbnail_url || "/film-placeholder.svg"} alt=""/><span className="reel-poster-play"><Play size={20} fill="currentColor"/></span></div>}
+                </div>
+                <div className="reel-caption"><h1>{item.video.title}</h1><PublicViewCount count={item.displayViews} className="reel-view-count"/>{item.video.description && <p>{item.video.description}</p>}</div>
+              </div>
+            </article>)}
+            {loadingMore && <div className="reels-load-status" role="status">Loading more reels...</div>}
+            {error && videos.length > 0 && <div className="reels-load-status" role="alert"><span>{error}</span><button className="button-secondary" type="button" onClick={() => void loadPage(page + 1)}>Try again</button></div>}
+            {!hasMore && videos.length > 0 && <div className="reels-load-status">You are all caught up.</div>}
+          </div>}
+  </main>;
+}

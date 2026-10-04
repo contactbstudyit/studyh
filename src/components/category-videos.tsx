@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Clock3, Command, Filter, Play, Search } from "lucide-react";
+import { Check, Clapperboard, Clock3, Command, Filter, Play, Search } from "lucide-react";
 import Link from "next/link";
 import { useVideos } from "@/hooks/use-library";
 import type { VideoSort } from "@/hooks/use-library";
@@ -35,7 +35,7 @@ function randomOrderKey(value: string, seed: number) {
   return hash;
 }
 
-export default function CategoryVideos({ category, initialSort = "latest", initialPage = 1, initialQuery = "" }: { category: PublicCategory; initialSort?: string; initialPage?: number; initialQuery?: string }) {
+export default function CategoryVideos({ category, slug, initialSort = "latest", initialPage = 1, initialQuery = "" }: { category: PublicCategory; slug: string; initialSort?: string; initialPage?: number; initialQuery?: string }) {
   const [query, setQuery] = useState(initialQuery);
   const [sort, setSort] = useState<VideoSort>(() => readSort(initialSort));
   const [page, setPage] = useState(initialPage);
@@ -106,6 +106,7 @@ export default function CategoryVideos({ category, initialSort = "latest", initi
   return <main className="site-shell">
     <header className="topbar category-topbar">
       <div className="header-actions category-header-actions">
+        <Link className="category-reels-link" href={`/category/${encodeURIComponent(slug)}/reels`} aria-label={`Watch ${category.name} reels`} title="Reels"><Clapperboard size={15} aria-hidden="true"/></Link>
         <label className="search-box"><Search size={16}/><input value={query} onChange={(event) => changeSearch(event.target.value)} placeholder="Search videos" aria-label={`Search ${category.name} videos`}/><kbd><Command size={10}/> K</kbd></label>
         <div className="sort-control" ref={filterRef}>
           <button className="sort-trigger" type="button" aria-haspopup="menu" aria-expanded={filterOpen} onClick={() => setFilterOpen((open) => !open)}><Filter size={15}/><span>Filter</span></button>

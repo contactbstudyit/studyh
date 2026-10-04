@@ -25,5 +25,5 @@ export default async function CategoryPage({ params, searchParams }: PageProps) 
   const sort = Array.isArray(search.sort) ? search.sort[0] : search.sort;
   const pageValue = Number.parseInt(Array.isArray(search.page) ? search.page[0] : search.page ?? "1", 10);
   const query = Array.isArray(search.q) ? search.q[0] : search.q ?? "";
-  return <CategoryVideos category={category} initialSort={sort} initialPage={Number.isFinite(pageValue) && pageValue > 0 ? pageValue : 1} initialQuery={query} />;
+  return <CategoryVideos category={category} slug={slug} initialSort={sort} initialPage={Number.isFinite(pageValue) && pageValue > 0 ? pageValue : 1} initialQuery={query} />;
 }

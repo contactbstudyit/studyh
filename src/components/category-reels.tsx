@@ -206,17 +206,18 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
              {loadingMore && <div className="reels-load-status" role="status">Loading more reels...</div>}
              {error && videos.length > 0 && <div className="reels-load-status" role="alert"><span>{error}</span><button className="button-secondary" type="button" onClick={() => void loadPage(page + 1)}>Try again</button></div>}
              {!hasMore && videos.length > 0 && <div className="reels-load-status end">You are all caught up.</div>}
+             {mobileViewport === true && <div className="reels-player-layer" aria-label="Active Reel playback" style={{ height: `${videos.length * 100}dvh` }}>
+               {(["a", "b"] as const).map((slot) => {
+                 const item = playerSlots[slot];
+                 if (!item) return null;
+                 const isActive = slot === activePlayerSlot;
+                 const slotIndex = videos.findIndex((video) => video.video.id === item.video.id);
+                 return <div className={`reel-player-slot ${isActive ? "active" : "preparing"}`} aria-hidden={!isActive} key={slot} style={{ top: `${Math.max(0, slotIndex) * 100}dvh` }}>
+                   <VideoPlayer key={slot} video={item.video} playbackUrl={item.playbackUrl} playbackType={item.playbackType} sourceHost={item.sourceHost} muted controls={false} preloadOnly={!isActive}/>
+                   {isActive && <div className="reel-caption mobile-reel-caption"><h1>{item.video.title}</h1><PublicViewCount count={item.displayViews} className="reel-view-count"/></div>}
+                 </div>;
+               })}
+             </div>}
            </div>}
-    {mobileViewport === true && videos[activeIndex] && <div className="reels-player-layer" aria-label="Active Reel playback">
-      {(["a", "b"] as const).map((slot) => {
-        const item = playerSlots[slot];
-        if (!item) return null;
-        const isActive = slot === activePlayerSlot;
-        return <div className={`reel-player-slot ${isActive ? "active" : "preparing"}`} aria-hidden={!isActive} key={slot}>
-          <VideoPlayer key={slot} video={item.video} playbackUrl={item.playbackUrl} playbackType={item.playbackType} sourceHost={item.sourceHost} muted controls={false} preloadOnly={!isActive}/>
-        </div>;
-      })}
-      <div className="reel-caption mobile-reel-caption"><h1>{videos[activeIndex].video.title}</h1><PublicViewCount count={videos[activeIndex].displayViews} className="reel-view-count"/></div>
-    </div>}
   </main>;
 }

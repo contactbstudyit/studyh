@@ -1,6 +1,18 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+.toaster[data-sonner-toaster] {
+  position: fixed !important;
+  top: max(16px, env(safe-area-inset-top)) !important;
+  right: auto !important;
+  bottom: auto !important;
+  left: 50% !important;
+  width: min(356px, calc(100vw - 32px)) !important;
+  max-width: calc(100vw - 32px) !important;
+  transform: translateX(-50%) !important;
+  z-index: 2147483647 !important;
+}
+
 * { box-sizing: border-box; }
 :root { --background: #0a0a0a; --foreground: #f4f3f0; --muted: #85847f; --line: rgba(255,255,255,.11); --panel: #121211; --accent: #d7c6a3; }
 html { scroll-behavior: smooth; }

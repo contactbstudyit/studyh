@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, Clapperboard, Play } from "lucide-react";
+import { ArrowLeft, Clapperboard, Filter, House, Play, Search } from "lucide-react";
 import Link from "next/link";
 import { VideoPlayer } from "@/components/video-player";
 import type { VideoRecord } from "@/hooks/use-library";
@@ -73,6 +73,12 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
       <Link className="reels-back" href={`/category/${encodeURIComponent(slug)}`} aria-label={`Back to ${categoryName} videos`}><ArrowLeft size={17}/></Link>
       <span className="reels-header-label"><Clapperboard size={14}/> Reels</span>
     </header>
+    <nav className="reels-mobile-nav" aria-label="Reels navigation">
+      <Link className="reels-mobile-control" href="/" aria-label="Home"><House size={18}/><span>Home</span></Link>
+      <Link className="reels-mobile-control active" href={`/category/${encodeURIComponent(slug)}/reels`} aria-current="page" aria-label="Reels"><Clapperboard size={18}/><span>Reels</span></Link>
+      <Link className="reels-mobile-control" href={`/category/${encodeURIComponent(slug)}?focusSearch=1`} aria-label="Search"><Search size={18}/><span>Search</span></Link>
+      <Link className="reels-mobile-control" href={`/category/${encodeURIComponent(slug)}?openFilter=1`} aria-label="Filter"><Filter size={18}/><span>Filter</span></Link>
+    </nav>
 
     {loading && videos.length === 0 ? <div className="reels-loading" role="status" aria-label={`Loading ${categoryName} reels`}><span className="spinner"/><span>Loading reels...</span></div>
       : error && videos.length === 0 ? <section className="reels-empty" role="alert"><strong>Could not load reels</strong><span>{error}</span><button className="button-secondary" type="button" onClick={() => void loadPage(1, true)}>Try again</button></section>
@@ -90,7 +96,7 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
             </article>)}
             {loadingMore && <div className="reels-load-status" role="status">Loading more reels...</div>}
             {error && videos.length > 0 && <div className="reels-load-status" role="alert"><span>{error}</span><button className="button-secondary" type="button" onClick={() => void loadPage(page + 1)}>Try again</button></div>}
-            {!hasMore && videos.length > 0 && <div className="reels-load-status">You are all caught up.</div>}
+            {!hasMore && videos.length > 0 && <div className="reels-load-status end">You are all caught up.</div>}
           </div>}
   </main>;
 }

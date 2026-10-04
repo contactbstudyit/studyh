@@ -389,10 +389,28 @@ nextjs-portal {
 .reels-empty span { max-width: 330px; color: #888; font-size: 11px; line-height: 1.5; }
 .reels-empty > a { margin-top: 4px; color: #ccc; font-size: 11px; text-decoration: underline; text-underline-offset: 3px; }
 .reels-load-status { display: flex; min-height: 64px; flex-wrap: wrap; align-items: center; justify-content: center; gap: 12px; padding: 14px 16px; color: #999; font-size: 10px; }
+.reels-mobile-nav { display: none; }
 @media (max-width: 720px) {
-  .reels-topbar { padding: 0 14px; }
-  .reels-back { flex-basis: 33px; width: 33px; height: 33px; }
-  .reel-slide { padding: 8px 12px; }
-  .reel-card { width: min(100%,460px); max-height: 100%; }
-  .reel-caption h1 { font-size: 13px; }
+  .reels-page { position: relative; display: block; width: 100%; height: 100vh; height: 100dvh; min-height: 0; overflow: hidden; }
+  .reels-page .reels-topbar { display: none; }
+  .reels-track { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .reel-slide { width: 100%; height: 100%; min-height: 100%; padding: 0; }
+  .reel-card { position: relative; display: block; width: 100%; height: 100%; max-height: none; overflow: hidden; }
+  .reel-media { position: absolute; z-index: 0; inset: 0; width: 100%; height: 100%; border: 0; border-radius: 0; }
+  .reel-media .player-frame { position: absolute; inset: 0; width: 100%; height: 100%; max-height: none; aspect-ratio: auto; overflow: hidden; border-radius: 0; }
+  .reel-media .player-frame video { object-fit: cover; }
+  .reel-media .player-frame video[data-reel-orientation="landscape"] { object-fit: contain; }
+  .reel-card::after { position: absolute; z-index: 1; right: 0; bottom: 0; left: 0; height: 38vh; background: linear-gradient(180deg,transparent 0%,rgba(0,0,0,.22) 32%,rgba(0,0,0,.8) 100%); content: ""; pointer-events: none; }
+  .reel-poster-wrap { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .reel-poster { object-fit: cover; }
+  .reel-poster-play { display: none; }
+  .reel-caption { position: absolute; z-index: 2; right: 16px; bottom: calc(env(safe-area-inset-bottom,0px) + 72px); left: 16px; padding: 0; }
+  .reel-caption h1 { display: -webkit-box; overflow: hidden; font-size: 15px; line-height: 1.35; text-overflow: ellipsis; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .reel-view-count { margin-top: 5px; color: rgba(255,255,255,.84); font-size: 11px; }
+  .reel-caption p,.reels-page .player-hint { display: none; }
+  .reels-mobile-nav { position: absolute; z-index: 20; top: 0; right: 0; left: 0; display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); align-items: center; width: 100%; padding: calc(env(safe-area-inset-top,0px) + 5px) 12px 8px; background: linear-gradient(180deg,rgba(0,0,0,.7),rgba(0,0,0,.28) 72%,transparent); }
+  .reels-mobile-control { display: flex; min-width: 0; min-height: 44px; flex-direction: column; align-items: center; justify-content: center; gap: 3px; color: rgba(255,255,255,.76); font-size: 9px; line-height: 1; text-decoration: none; -webkit-tap-highlight-color: transparent; }
+  .reels-mobile-control.active { color: #fff; font-weight: 600; }
+  .reels-mobile-control:focus-visible { outline: 1px solid rgba(255,255,255,.8); outline-offset: -2px; border-radius: 4px; }
+  .reels-load-status.end { display: none; }
 }

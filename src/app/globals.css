@@ -334,3 +334,11 @@ body { background: #000; color: #fff; font-family: var(--font-geist-sans), syste
 nextjs-portal {
   display: none !important;
 }
+
+.section-wrap.category-results-page {
+  padding-top: 0;
+}
+
+.category-results-page .category-strip {
+  margin-top: 0;
+}

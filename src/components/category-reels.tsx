@@ -96,9 +96,8 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
             {videos.map((item, index) => <article className="reel-slide" data-reel-index={index} key={item.video.id} aria-label={`Video ${index + 1}: ${item.video.title}`}>
               <div className="reel-card">
                 <div className="reel-media">
-                  {activeIndex === index && mobileViewport !== null
-                    ? <VideoPlayer video={item.video} playbackUrl={item.playbackUrl} playbackType={item.playbackType} sourceHost={item.sourceHost} muted controls={!mobileViewport}/>
-                    : <div className="reel-poster-wrap"><img className="reel-poster" loading="lazy" src={item.video.thumbnail_url || "/film-placeholder.svg"} alt=""/><span className="reel-poster-play"><Play size={20} fill="currentColor"/></span></div>}
+                  {activeIndex !== index && <div className="reel-poster-wrap"><img className="reel-poster" loading="lazy" src={item.video.thumbnail_url || "/film-placeholder.svg"} alt=""/><span className="reel-poster-play"><Play size={20} fill="currentColor"/></span></div>}
+                  {mobileViewport !== null && (activeIndex === index || mobileViewport && activeIndex + 1 === index) && <VideoPlayer key={item.video.id} video={item.video} playbackUrl={item.playbackUrl} playbackType={item.playbackType} sourceHost={item.sourceHost} muted controls={!mobileViewport} preloadOnly={activeIndex !== index}/>}
                 </div>
                 <div className="reel-caption"><h1>{item.video.title}</h1><PublicViewCount count={item.displayViews} className="reel-view-count"/>{item.video.description && <p>{item.video.description}</p>}</div>
               </div>

@@ -9,6 +9,7 @@ import type { PublicCategory } from "@/lib/category-routes";
 import VideoPagination from "@/components/video-pagination";
 import gridStyles from "@/components/public-video-grid.module.css";
 import PublicViewCount from "@/components/public-view-count";
+import MobileBottomNavigation from "@/components/mobile-bottom-navigation";
 
 const PUBLIC_PAGE_SIZE = 15;
 
@@ -41,6 +42,7 @@ export default function CategoryVideos({ category, slug, initialSort = "latest",
   const [page, setPage] = useState(initialPage);
   const [randomSeed, setRandomSeed] = useState(1);
   const [filterOpen, setFilterOpen] = useState(initialFilterOpen);
+  const [searchOpen, setSearchOpen] = useState(focusSearchOnMount);
   const filterRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const videosHook = useVideos({ categoryId: category.id, search: query, admin: false, sort, pageNumber: page, pageSize: PUBLIC_PAGE_SIZE, dailyFeed: true });
@@ -62,18 +64,32 @@ export default function CategoryVideos({ category, slug, initialSort = "latest",
   useEffect(() => {
     if (!filterOpen) return;
     const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") setFilterOpen(false); };
-    const onPointerDown = (event: PointerEvent) => { if (!filterRef.current?.contains(event.target as Node)) setFilterOpen(false); };
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest(".reels-mobile-nav")) return;
+      if (!filterRef.current?.contains(target as Node)) setFilterOpen(false);
+    };
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("pointerdown", onPointerDown);
     return () => { window.removeEventListener("keydown", onKeyDown); window.removeEventListener("pointerdown", onPointerDown); };
   }, [filterOpen]);
   useEffect(() => {
-    if (!focusSearchOnMount) return;
+    if (!searchOpen) return;
     searchInputRef.current?.focus();
     const url = new URL(window.location.href);
     url.searchParams.delete("focusSearch");
     window.history.replaceState(null, "", url);
-  }, [focusSearchOnMount]);
+  }, [searchOpen]);
+
+  function toggleCategorySearch() {
+    setFilterOpen(false);
+    setSearchOpen((open) => !open);
+  }
+
+  function toggleCategoryFilter() {
+    setSearchOpen(false);
+    setFilterOpen((open) => !open);
+  }
 
   function selectSort(next: VideoSort) {
     const option = sortOptions.find((item) => item.value === next);
@@ -116,7 +132,7 @@ export default function CategoryVideos({ category, slug, initialSort = "latest",
   }, [videosHook.totalCount, page]);
 
   return <main className="site-shell">
-    <header className="topbar category-topbar">
+    <header className={`topbar category-topbar ${searchOpen ? "category-search-open" : ""} ${filterOpen ? "category-filter-open" : ""}`}>
       <div className="header-actions category-header-actions">
         <Link className="category-reels-link" href={`/category/${encodeURIComponent(slug)}/reels`} aria-label={`Watch ${category.name} reels`} title="Reels"><Clapperboard size={15} aria-hidden="true"/></Link>
         <label className="search-box"><Search size={16}/><input ref={searchInputRef} value={query} onChange={(event) => changeSearch(event.target.value)} placeholder="Search videos" aria-label={`Search ${category.name} videos`}/><kbd><Command size={10}/> K</kbd></label>
@@ -131,5 +147,6 @@ export default function CategoryVideos({ category, slug, initialSort = "latest",
       {!videosHook.loading && videosHook.totalCount === 0 && <div className="empty-state"><Search size={22}/><strong>No videos in {category.name} yet</strong><span>Check back later for new videos.</span></div>}
       <VideoPagination page={page} totalPages={totalPages} loading={videosHook.loading} onPageChange={changePage}/>
     </section>
+    <MobileBottomNavigation slug={slug} context="category" filterActive={filterOpen} onSearch={toggleCategorySearch} onFilter={toggleCategoryFilter}/>
   </main>;
 }

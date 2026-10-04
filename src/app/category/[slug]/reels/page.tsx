@@ -9,5 +9,5 @@ export default async function CategoryReelsPage({ params }: { params: Promise<{ 
   const category = await getPublicCategoryBySlug(slug);
   if (!category) notFound();
 
-  return <CategoryReels slug={slug} categoryName={category.name}/>;
+  return <CategoryReels key={slug} slug={slug} categoryName={category.name}/>;
 }

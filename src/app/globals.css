@@ -416,6 +416,7 @@ nextjs-portal {
   .reels-skeleton-title.long { width: min(78%,330px); }
   .reels-skeleton-title.short { width: min(54%,220px); }
   .reels-skeleton-views { width: 82px; height: 11px; margin-top: 1px; border-radius: 6px; background: rgba(255,255,255,.1); }
+  .reel-no-audio { position: absolute; z-index: 4; top: calc(env(safe-area-inset-top,0px) + 14px); right: 16px; display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid rgba(255,255,255,.18); border-radius: 50%; background: rgba(0,0,0,.46); color: rgba(255,255,255,.82); pointer-events: none; }
   @keyframes reels-skeleton-shimmer { to { transform: translateX(100%); } }
   @media (prefers-reduced-motion: reduce) { .reels-video-skeleton { transition: none; }.reels-video-skeleton::before { transform: none; animation: none; opacity: .45; } }
   .reels-player-layer .player-frame video { object-fit: cover; }

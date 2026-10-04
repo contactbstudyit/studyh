@@ -8,13 +8,16 @@ import { getPlaybackFailureReason, probeVideoSource, supportsNativeHls } from "@
 import type { SourceProbe, VideoSourceType } from "@/lib/video-playback";
 
 type WatchVideo = Omit<VideoRecord, "video_url" | "views" | "display_view_count" | "published_at">;
+type PlaybackStatus = "loading" | "ready" | "error";
 
-export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onViewCounted, muted = false, controls = true, preloadOnly = false }: {
+export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onViewCounted, onPlaybackStatusChange, loadingPresentation = "spinner", muted = false, controls = true, preloadOnly = false }: {
   video: WatchVideo;
   playbackUrl: string;
   playbackType: VideoSourceType;
   sourceHost: string;
   onViewCounted?: () => void;
+  onPlaybackStatusChange?: (videoId: string, status: PlaybackStatus) => void;
+  loadingPresentation?: "spinner" | "external";
   muted?: boolean;
   controls?: boolean;
   preloadOnly?: boolean;
@@ -33,7 +36,9 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
   const preloadOnlyRef = useRef(preloadOnly);
   const previousPreloadModeRef = useRef(preloadOnly);
   const preloadWarmStartedRef = useRef(false);
+  const playbackStatusCallbackRef = useRef(onPlaybackStatusChange);
   preloadOnlyRef.current = preloadOnly;
+  playbackStatusCallbackRef.current = onPlaybackStatusChange;
   const playbackReportedRef = useRef(false);
   const viewedVideoIdRef = useRef<string | null>(null);
   const hlsManagedRef = useRef(false);
@@ -50,6 +55,7 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
     preloadWarmStartedRef.current = false;
     hlsManagedRef.current = false;
     setFailure(""); setLoading(true); setSourceType(playbackType);
+    playbackStatusCallbackRef.current?.(video.id, "loading");
     setDiagnostics({ status: null, contentType: null, finalHost: null, error: null, hlsType: null, hlsDetails: null, hlsStatus: null, mediaErrorCode: null });
     if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
     if (process.env.NODE_ENV === "development") console.info("[video-playback] secure relay selected", { sourceHost, playbackType, pageOrigin: window.location.origin, attempt });
@@ -64,6 +70,7 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
       const reason = getPlaybackFailureReason({ sourceType: resolvedType, httpStatus: hlsStatus ?? probe?.status ?? null, probeError: probe?.error ?? null, hlsType, hlsDetails, hlsStatus });
       setDiagnostics((current) => ({ ...current, hlsType, hlsDetails, hlsStatus }));
       setFailure(reason); setLoading(false);
+      playbackStatusCallbackRef.current?.(video.id, "error");
       if (process.env.NODE_ENV === "development") console.error("[video-playback] secure relay failed", { sourceHost, playbackType: resolvedType, pageOrigin: window.location.origin, failureType: hlsType, status: hlsStatus, reason, lifecycle: { ...lifecycle } });
     };
 
@@ -110,7 +117,7 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
             hls.on(HlsPlayer.Events.MEDIA_ATTACHED, () => { lifecycle.mediaAttached = true; if (process.env.NODE_ENV === "development") console.info("[HLS MEDIA_ATTACHED]", { sourceHost, attached: true }); });
             hls.on(HlsPlayer.Events.MANIFEST_LOADING, () => { lifecycle.manifestLoading = true; if (process.env.NODE_ENV === "development") console.info("[HLS MANIFEST_LOADING]", { sourceHost, request: "same-origin relay" }); });
             hls.on(HlsPlayer.Events.MANIFEST_LOADED, (_event, data) => { lifecycle.manifestLoaded = true; if (process.env.NODE_ENV === "development") console.info("[HLS MANIFEST_LOADED]", { sourceHost, levels: data.levels?.length ?? 0 }); });
-            hls.on(HlsPlayer.Events.MANIFEST_PARSED, (_event, data) => { lifecycle.manifestParsed = true; if (!active) return; setLoading(false); if (process.env.NODE_ENV === "development") console.info("[HLS MANIFEST_PARSED]", { sourceHost, levels: data.levels?.length ?? 0 }); if (preloadOnlyRef.current) startSilentWarm(element); else void element.play().catch(() => {}); });
+            hls.on(HlsPlayer.Events.MANIFEST_PARSED, (_event, data) => { lifecycle.manifestParsed = true; if (!active) return; const ready = hasPlayableMedia(element); setLoading(!ready); playbackStatusCallbackRef.current?.(video.id, ready ? "ready" : "loading"); if (process.env.NODE_ENV === "development") console.info("[HLS MANIFEST_PARSED]", { sourceHost, levels: data.levels?.length ?? 0 }); if (preloadOnlyRef.current) startSilentWarm(element); else void element.play().catch(() => {}); });
             hls.on(HlsPlayer.Events.FRAG_LOADING, (_event, data) => { lifecycle.fragLoading = true; if (process.env.NODE_ENV === "development") console.info("[HLS FRAG_LOADING]", { sourceHost, level: data.frag.level, sequence: data.frag.sn }); });
             hls.on(HlsPlayer.Events.FRAG_LOADED, (_event, data) => { lifecycle.fragLoaded = true; if (process.env.NODE_ENV === "development") console.info("[HLS FRAG_LOADED]", { sourceHost, level: data.frag.level, sequence: data.frag.sn }); });
             hls.on(HlsPlayer.Events.ERROR, (_event, data) => {
@@ -174,10 +181,18 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
     const buffered = element.buffered.length > 0 && element.buffered.end(element.buffered.length - 1) - element.currentTime > 0.15;
     const ready = element.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA || buffered;
     setLoading(!ready);
+    playbackStatusCallbackRef.current?.(video.id, ready ? "ready" : "loading");
     void element.play().then(() => setLoading(false)).catch(() => {
-      if (element.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) setLoading(true);
+      const playable = hasPlayableMedia(element);
+      setLoading(!playable);
+      playbackStatusCallbackRef.current?.(video.id, playable ? "ready" : "loading");
     });
   }, [preloadOnly]);
+
+  function hasPlayableMedia(element: HTMLVideoElement) {
+    const buffered = element.buffered.length > 0 && element.buffered.end(element.buffered.length - 1) - element.currentTime > 0.15;
+    return element.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA || buffered;
+  }
 
   function startSilentWarm(element: HTMLVideoElement) {
     if (!preloadOnlyRef.current || preloadWarmStartedRef.current) return;
@@ -190,7 +205,7 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
     const mediaErrorCode = event.currentTarget.error?.code ?? null;
     if (sourceType === "hls" && hlsManagedRef.current) { if (process.env.NODE_ENV === "development") console.warn("[video-playback] media element error while hls.js is active; waiting for fatal HLS event", { sourceHost, mediaErrorCode }); return; }
     const reason = getPlaybackFailureReason({ sourceType, httpStatus: diagnostics.status, probeError: diagnostics.error, mediaErrorCode, hlsType: diagnostics.hlsType, hlsDetails: diagnostics.hlsDetails, hlsStatus: diagnostics.hlsStatus });
-    setDiagnostics((current) => ({ ...current, mediaErrorCode })); setLoading(false); setFailure(reason);
+    setDiagnostics((current) => ({ ...current, mediaErrorCode })); setLoading(false); setFailure(reason); playbackStatusCallbackRef.current?.(video.id, "error");
     if (process.env.NODE_ENV === "development") console.error("[video-playback] relay media error", { sourceHost, sourceType, mediaErrorCode, reason });
   }
 
@@ -198,12 +213,18 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
     setLoading(false);
     if (preloadOnlyRef.current) {
       const element = videoRef.current;
-      element?.pause();
-      if (element && element.currentTime !== 0) {
+      if (!element) {
+        playbackStatusCallbackRef.current?.(video.id, "loading");
+        return;
+      }
+      element.pause();
+      if (element.currentTime !== 0) {
         try { element.currentTime = 0; } catch { /* Keep the current buffered position if the browser cannot seek yet. */ }
       }
+      playbackStatusCallbackRef.current?.(video.id, hasPlayableMedia(element) ? "ready" : "loading");
       return;
     }
+    playbackStatusCallbackRef.current?.(video.id, "ready");
     if (!playbackReportedRef.current && process.env.NODE_ENV === "development") { playbackReportedRef.current = true; console.info("[video-playback] playback confirmed", { source: sourceHost, format: sourceType.toUpperCase(), relay: "same-origin" }); }
     if (viewedVideoIdRef.current !== video.id) {
       viewedVideoIdRef.current = video.id;
@@ -211,5 +232,5 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
     }
   }
   const diagnosticLines = [`Source: ${sourceHost}`, `Format: ${sourceType.toUpperCase()}`, diagnostics.hlsStatus !== null ? `HTTP status: ${diagnostics.hlsStatus}` : null, diagnostics.hlsType ? `Player category: ${diagnostics.hlsType}` : null];
-  return <div className={`player-frame${preloadOnly ? " preload-only" : ""}`} data-source-type={sourceType} aria-hidden={preloadOnly || undefined}><video ref={videoRef} controls={controls} autoPlay={!preloadOnly} playsInline muted={muted} preload="metadata" poster={video.thumbnail_url || undefined} onLoadedMetadata={(event) => { const element = event.currentTarget; if (element.closest(".reel-media, .reels-player-layer") && element.videoWidth && element.videoHeight) element.dataset.reelOrientation = element.videoHeight > element.videoWidth ? "portrait" : "landscape"; setLoading(false); if (preloadOnlyRef.current) startSilentWarm(element); }} onCanPlay={(event) => { setLoading(false); if (preloadOnlyRef.current) startSilentWarm(event.currentTarget); }} onPlaying={handlePlaybackStarted} onWaiting={() => setLoading(true)} onError={handleMediaError}/>{loading && !failure && <div className="player-loading"><span className="spinner"/><span>Loading video...</span></div>}{failure && <div className="player-error"><Film size={24}/><strong>Unable to play this video</strong><span className="player-reason">{failure}</span><span className="player-diagnostics">{diagnosticLines.join(" · ")}</span><button type="button" onClick={() => { setFailure(""); setAttempt((current) => current + 1); }}>Try again</button></div>}<span className="player-hint"><Command size={12}/> SPACE TO PLAY</span></div>;
+  return <div className={`player-frame${preloadOnly ? " preload-only" : ""}`} data-source-type={sourceType} aria-hidden={preloadOnly || undefined}><video ref={videoRef} controls={controls} autoPlay={!preloadOnly} playsInline muted={muted} preload="metadata" poster={video.thumbnail_url || undefined} onLoadedMetadata={(event) => { const element = event.currentTarget; if (element.closest(".reel-media, .reels-player-layer") && element.videoWidth && element.videoHeight) element.dataset.reelOrientation = element.videoHeight > element.videoWidth ? "portrait" : "landscape"; const ready = hasPlayableMedia(element); setLoading(!ready); playbackStatusCallbackRef.current?.(video.id, ready ? "ready" : "loading"); if (preloadOnlyRef.current) startSilentWarm(element); }} onCanPlay={(event) => { setLoading(false); playbackStatusCallbackRef.current?.(video.id, "ready"); if (preloadOnlyRef.current) startSilentWarm(event.currentTarget); }} onPlaying={handlePlaybackStarted} onWaiting={(event) => { const ready = hasPlayableMedia(event.currentTarget); setLoading(!ready); playbackStatusCallbackRef.current?.(video.id, ready ? "ready" : "loading"); }} onError={handleMediaError}/>{loading && !failure && loadingPresentation === "spinner" && <div className="player-loading"><span className="spinner"/><span>Loading video...</span></div>}{failure && <div className="player-error"><Film size={24}/><strong>Unable to play this video</strong><span className="player-reason">{failure}</span><span className="player-diagnostics">{diagnosticLines.join(" · ")}</span><button type="button" onClick={() => { setFailure(""); setAttempt((current) => current + 1); }}>Try again</button></div>}<span className="player-hint"><Command size={12}/> SPACE TO PLAY</span></div>;
 }

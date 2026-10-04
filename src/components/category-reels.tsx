@@ -14,6 +14,7 @@ type ReelItem = { video: ReelVideo; playbackUrl: string; playbackType: VideoSour
 type ReelResponse = { videos: ReelItem[]; page: number; pageSize: number; hasMore: boolean; error?: string };
 type PlayerSlot = "a" | "b";
 type PlayerSlots = Record<PlayerSlot, ReelItem | null>;
+type ReelPlaybackStatus = "loading" | "ready" | "error";
 
 function otherPlayerSlot(slot: PlayerSlot): PlayerSlot {
   return slot === "a" ? "b" : "a";
@@ -30,12 +31,14 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
   const [mobileViewport, setMobileViewport] = useState<boolean | null>(null);
   const [playerSlots, setPlayerSlots] = useState<PlayerSlots>({ a: null, b: null });
   const [activePlayerSlot, setActivePlayerSlot] = useState<PlayerSlot>("a");
+  const [activePlaybackStatus, setActivePlaybackStatus] = useState<ReelPlaybackStatus>("loading");
   const trackRef = useRef<HTMLDivElement>(null);
   const loadingRef = useRef(false);
   const videosRef = useRef(videos);
   const activeIndexRef = useRef(activeIndex);
   const playerSlotsRef = useRef(playerSlots);
   const activePlayerSlotRef = useRef(activePlayerSlot);
+  const slotPlaybackStatusRef = useRef<Record<PlayerSlot, ReelPlaybackStatus>>({ a: "loading", b: "loading" });
   videosRef.current = videos;
   activeIndexRef.current = activeIndex;
   playerSlotsRef.current = playerSlots;
@@ -57,10 +60,14 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
       nextSlots[promotedSlot] = target;
       nextSlots[recycledSlot] = next?.video.id !== target.video.id ? next : null;
 
+      for (const slot of ["a", "b"] as const) {
+        if (playerSlotsRef.current[slot]?.video.id !== nextSlots[slot]?.video.id) slotPlaybackStatusRef.current[slot] = "loading";
+      }
       playerSlotsRef.current = nextSlots;
       setPlayerSlots(nextSlots);
       activePlayerSlotRef.current = promotedSlot;
       setActivePlayerSlot(promotedSlot);
+      setActivePlaybackStatus(slotPlaybackStatusRef.current[promotedSlot]);
     }
 
     if (index !== activeIndexRef.current) {
@@ -85,6 +92,8 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
       setPlayerSlots({ a: null, b: null });
       activePlayerSlotRef.current = "a";
       setActivePlayerSlot("a");
+      slotPlaybackStatusRef.current = { a: "loading", b: "loading" };
+      setActivePlaybackStatus("loading");
     } else setLoadingMore(true);
     try {
       const response = await fetch(`/api/public/category-reels/${encodeURIComponent(slug)}?page=${nextPage}`, { cache: "no-store" });
@@ -103,6 +112,12 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
     }
   }, [slug]);
 
+  const reportSlotPlaybackStatus = useCallback((slot: PlayerSlot, videoId: string, status: ReelPlaybackStatus) => {
+    if (playerSlotsRef.current[slot]?.video.id !== videoId) return;
+    slotPlaybackStatusRef.current[slot] = status;
+    if (activePlayerSlotRef.current === slot) setActivePlaybackStatus(status);
+  }, []);
+
   useEffect(() => { void loadPage(1, true); }, [loadPage]);
 
   useEffect(() => {
@@ -120,6 +135,8 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
         setPlayerSlots({ a: null, b: null });
         activePlayerSlotRef.current = "a";
         setActivePlayerSlot("a");
+        slotPlaybackStatusRef.current = { a: "loading", b: "loading" };
+        setActivePlaybackStatus("loading");
       }
       return;
     }
@@ -137,6 +154,9 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
     const slotsChanged = (['a', 'b'] as const).some((slot) => playerSlotsRef.current[slot]?.video.id !== desired[slot]?.video.id);
 
     if (slotsChanged) {
+      for (const slot of ["a", "b"] as const) {
+        if (playerSlotsRef.current[slot]?.video.id !== desired[slot]?.video.id) slotPlaybackStatusRef.current[slot] = "loading";
+      }
       playerSlotsRef.current = desired;
       setPlayerSlots(desired);
     }
@@ -144,6 +164,7 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
       activePlayerSlotRef.current = promotedSlot;
       setActivePlayerSlot(promotedSlot);
     }
+    setActivePlaybackStatus(slotPlaybackStatusRef.current[promotedSlot]);
   }, [activeIndex, mobileViewport, videos]);
 
   useEffect(() => {
@@ -207,10 +228,11 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
                  const item = playerSlots[slot];
                  if (!item) return null;
                  const isActive = slot === activePlayerSlot;
-                 const slotIndex = videos.findIndex((video) => video.video.id === item.video.id);
-                 return <div className={`reel-player-slot ${isActive ? "active" : "preparing"}`} aria-hidden={!isActive} key={slot} style={{ top: `${Math.max(0, slotIndex) * 100}dvh` }}>
-                   <VideoPlayer key={slot} video={item.video} playbackUrl={item.playbackUrl} playbackType={item.playbackType} sourceHost={item.sourceHost} muted controls={false} preloadOnly={!isActive}/>
-                   {isActive && <div className="reel-caption mobile-reel-caption"><h1>{item.video.title}</h1><PublicViewCount count={item.displayViews} className="reel-view-count"/></div>}
+                  const slotIndex = videos.findIndex((video) => video.video.id === item.video.id);
+                  return <div className={`reel-player-slot ${isActive ? "active" : "preparing"}`} aria-hidden={!isActive} key={slot} style={{ top: `${Math.max(0, slotIndex) * 100}dvh` }}>
+                    <VideoPlayer key={slot} video={item.video} playbackUrl={item.playbackUrl} playbackType={item.playbackType} sourceHost={item.sourceHost} muted controls={false} preloadOnly={!isActive} loadingPresentation="external" onPlaybackStatusChange={(videoId, status) => reportSlotPlaybackStatus(slot, videoId, status)}/>
+                    {isActive && <div className={`reels-video-skeleton${activePlaybackStatus === "ready" ? " ready" : activePlaybackStatus === "error" ? " failed" : ""}`} aria-hidden="true"><div className="reels-skeleton-caption"><span className="reels-skeleton-title long"/><span className="reels-skeleton-title short"/><span className="reels-skeleton-views"/></div></div>}
+                    {isActive && <div className="reel-caption mobile-reel-caption"><h1>{item.video.title}</h1><PublicViewCount count={item.displayViews} className="reel-view-count"/></div>}
                  </div>;
                })}
              </div>}

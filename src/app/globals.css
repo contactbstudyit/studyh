@@ -407,6 +407,17 @@ nextjs-portal {
   .reels-page .player-frame.preload-only { position: absolute; inset: 0; z-index: 0; width: 100%; height: 100%; max-height: none; aspect-ratio: auto; overflow: hidden; opacity: 0; pointer-events: none; }
   .reels-page .player-frame.preload-only video { width: 100%; height: 100%; }
   .reels-page .player-frame.preload-only .player-loading,.reels-page .player-frame.preload-only .player-error,.reels-page .player-frame.preload-only .player-hint { display: none; }
+  .reels-video-skeleton { position: absolute; z-index: 3; inset: 0; overflow: hidden; background: #18191c; opacity: 1; pointer-events: none; transition: opacity .2s ease; }
+  .reels-video-skeleton::before { position: absolute; inset: 0; background: linear-gradient(105deg,transparent 30%,rgba(255,255,255,.025) 43%,rgba(255,255,255,.07) 50%,rgba(255,255,255,.025) 57%,transparent 70%); content: ""; transform: translateX(-100%); animation: reels-skeleton-shimmer 1.7s ease-in-out infinite; }
+  .reels-video-skeleton.ready,.reels-video-skeleton.failed { opacity: 0; transition: opacity .2s ease; }
+  .reels-video-skeleton.failed::before { animation: none; }
+  .reels-skeleton-caption { position: absolute; right: 16px; bottom: 0; left: 16px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+  .reels-skeleton-title,.reels-skeleton-views { display: block; height: 14px; border-radius: 4px; background: rgba(255,255,255,.12); }
+  .reels-skeleton-title.long { width: min(78%,330px); }
+  .reels-skeleton-title.short { width: min(54%,220px); }
+  .reels-skeleton-views { width: 82px; height: 11px; margin-top: 1px; border-radius: 6px; background: rgba(255,255,255,.1); }
+  @keyframes reels-skeleton-shimmer { to { transform: translateX(100%); } }
+  @media (prefers-reduced-motion: reduce) { .reels-video-skeleton { transition: none; }.reels-video-skeleton::before { transform: none; animation: none; opacity: .45; } }
   .reels-player-layer .player-frame video { object-fit: cover; }
   .reels-player-layer .player-frame video[data-reel-orientation="landscape"] { object-fit: contain; }
   .reel-player-slot.active::after { position: absolute; z-index: 1; right: 0; bottom: 0; left: 0; height: 38vh; background: linear-gradient(180deg,transparent 0%,rgba(0,0,0,.22) 32%,rgba(0,0,0,.8) 100%); content: ""; pointer-events: none; }

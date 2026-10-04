@@ -411,7 +411,7 @@ nextjs-portal {
   .reels-player-layer .player-frame video[data-reel-orientation="landscape"] { object-fit: contain; }
   .reel-player-slot.active::after { position: absolute; z-index: 1; right: 0; bottom: 0; left: 0; height: 38vh; background: linear-gradient(180deg,transparent 0%,rgba(0,0,0,.22) 32%,rgba(0,0,0,.8) 100%); content: ""; pointer-events: none; }
   .reels-track .reel-caption { display: none; }
-  .reels-player-layer .mobile-reel-caption { position: absolute; z-index: 2; right: 16px; bottom: 12px; left: 16px; padding: 0; }
+  .reels-player-layer .mobile-reel-caption { position: absolute; z-index: 2; right: 16px; bottom: 0; left: 16px; display: block; padding: 0; }
   .reel-media .player-frame video { object-fit: cover; }
   .reel-media .player-frame video[data-reel-orientation="landscape"] { object-fit: contain; }
   .reel-card::after { position: absolute; z-index: 1; right: 0; bottom: calc(68px + env(safe-area-inset-bottom,0px)); left: 0; height: 38vh; background: linear-gradient(180deg,transparent 0%,rgba(0,0,0,.22) 32%,rgba(0,0,0,.8) 100%); content: ""; pointer-events: none; }

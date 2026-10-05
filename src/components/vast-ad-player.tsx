@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-const VAST_TAG = "https://spitefulmom.com/d.mbFwzsdeG/N/vKZlGzUP/Iecm-9nuaZ/UTlmkMPvTgcK0DOoDzkhxjOLDmkKttNXzKQS4/OAT/E-5tMdwS";
+const VAST_TAG = "https://spitefulmom.com/d/mVFLzVd.GLN/v/ZqGJUI/aeQmR9kuPZtUDlMkRPDTbcK0/OsDjkVx/OgD_kktdNnzFQx4/OPT/EI5/MXwh";
 const IMA_SCRIPT = "https://imasdk.googleapis.com/js/sdkloader/ima3.js";
 
 type ImaManager = {

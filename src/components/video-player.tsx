@@ -21,12 +21,13 @@ function detectNativeAudioAvailability(element: HTMLVideoElement): ReelAudioAvai
   return "unknown";
 }
 
-export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onViewCounted, onPlaybackStatusChange, onAudioAvailabilityChange, loadingPresentation = "spinner", muted = false, reelAudio = false, controls = true, preloadOnly = false, autoPlay, onVideoElement, playerOverlay }: {
+export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onViewCounted, onPlaybackStarted, onPlaybackStatusChange, onAudioAvailabilityChange, loadingPresentation = "spinner", muted = false, reelAudio = false, controls = true, preloadOnly = false, autoPlay, onVideoElement, playerOverlay }: {
   video: WatchVideo;
   playbackUrl: string;
   playbackType: VideoSourceType;
   sourceHost: string;
   onViewCounted?: () => void;
+  onPlaybackStarted?: (videoId: string) => void;
   onPlaybackStatusChange?: (videoId: string, status: PlaybackStatus) => void;
   onAudioAvailabilityChange?: (videoId: string, availability: ReelAudioAvailability) => void;
   loadingPresentation?: "spinner" | "external";
@@ -55,6 +56,7 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
   const previousPreloadModeRef = useRef(preloadOnly);
   const preloadWarmStartedRef = useRef(false);
   const playbackStatusCallbackRef = useRef(onPlaybackStatusChange);
+  const playbackStartedCallbackRef = useRef(onPlaybackStarted);
   const audioAvailabilityCallbackRef = useRef(onAudioAvailabilityChange);
   const audioAvailabilityRef = useRef<ReelAudioAvailability>("unknown");
   const reelAudioRef = useRef(reelAudio);
@@ -68,6 +70,7 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
   }, [onVideoElement]);
   preloadOnlyRef.current = preloadOnly;
   playbackStatusCallbackRef.current = onPlaybackStatusChange;
+  playbackStartedCallbackRef.current = onPlaybackStarted;
   audioAvailabilityCallbackRef.current = onAudioAvailabilityChange;
   reelAudioRef.current = reelAudio;
   const playbackReportedRef = useRef(false);
@@ -357,6 +360,7 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
       viewedVideoIdRef.current = video.id;
       void recordPublicVideoView(video.id).then((counted) => { if (counted) onViewCounted?.(); });
     }
+    playbackStartedCallbackRef.current?.(video.id);
   }
   const diagnosticLines = [`Source: ${sourceHost}`, `Format: ${sourceType.toUpperCase()}`, diagnostics.hlsStatus !== null ? `HTTP status: ${diagnostics.hlsStatus}` : null, diagnostics.hlsType ? `Player category: ${diagnostics.hlsType}` : null];
   return <div className={`player-frame${preloadOnly ? " preload-only" : ""}`} data-source-type={sourceType} aria-hidden={preloadOnly || undefined}><video ref={setVideoElement} controls={controls} autoPlay={shouldAutoplay} playsInline muted={preloadOnly || muted || (reelAudio && autoplayMuted)} preload="metadata" poster={video.thumbnail_url || undefined} onLoadedMetadata={(event) => { const element = event.currentTarget; if (element.closest(".reel-media, .reels-player-layer") && element.videoWidth && element.videoHeight) element.dataset.reelOrientation = element.videoHeight > element.videoWidth ? "portrait" : "landscape"; publishNativeAudioAvailability(element); const ready = hasPlayableMedia(element); setLoading(!ready); playbackStatusCallbackRef.current?.(video.id, ready ? "ready" : "loading"); if (preloadOnlyRef.current) startSilentWarm(element); }} onCanPlay={(event) => { publishNativeAudioAvailability(event.currentTarget); setLoading(false); playbackStatusCallbackRef.current?.(video.id, "ready"); if (preloadOnlyRef.current) startSilentWarm(event.currentTarget); }} onPlaying={handlePlaybackStarted} onWaiting={(event) => { publishNativeAudioAvailability(event.currentTarget); const ready = hasPlayableMedia(event.currentTarget); setLoading(!ready); playbackStatusCallbackRef.current?.(video.id, ready ? "ready" : "loading"); }} onTimeUpdate={(event) => publishNativeAudioAvailability(event.currentTarget)} onError={handleMediaError}/>{playerOverlay}{loading && !failure && loadingPresentation === "spinner" && <div className="player-loading"><span className="spinner"/><span>Loading video...</span></div>}{failure && <div className="player-error"><Film size={24}/><strong>Unable to play this video</strong><span className="player-reason">{failure}</span><span className="player-diagnostics">{diagnosticLines.join(" · ")}</span><button type="button" onClick={() => { setFailure(""); setAttempt((current) => current + 1); }}>Try again</button></div>}<span className="player-hint"><Command size={12}/> SPACE TO PLAY</span></div>;

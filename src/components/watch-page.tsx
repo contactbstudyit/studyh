@@ -1,12 +1,13 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Command, Film, Play, Search } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRecommendedVideos } from "@/hooks/use-library";
 import type { VideoRecord } from "@/hooks/use-library";
 import { VideoPlayer } from "@/components/video-player";
+import { ExoclickVastAd } from "@/components/exoclick-vast-ad";
 import styles from "@/components/watch-page.module.css";
 import type { VideoSourceType } from "@/lib/video-playback";
 import { formatPublicViewCount } from "@/lib/public-view-count";
@@ -19,7 +20,9 @@ export default function WatchPage({ video, playbackUrl, playbackType, sourceHost
   const [search, setSearch] = useState("");
   const [viewCount, setViewCount] = useState(displayViews);
   const [mobileLayout, setMobileLayout] = useState(false);
+  const contentVideoRef = useRef<HTMLVideoElement | null>(null);
   const recommended = useRecommendedVideos(video);
+  const setContentVideo = useCallback((element: HTMLVideoElement | null) => { contentVideoRef.current = element; }, []);
 
   useEffect(() => {
     const breakpoint = window.matchMedia("(max-width: 720px)");
@@ -47,7 +50,7 @@ export default function WatchPage({ video, playbackUrl, playbackType, sourceHost
 
     <div className="watch-page-content">
       <section className="watch-page-current" aria-label="Now playing">
-        <VideoPlayer video={video} playbackUrl={playbackUrl} playbackType={playbackType} sourceHost={sourceHost} onViewCounted={() => setViewCount((current) => current + 1)}/>
+        <VideoPlayer video={video} playbackUrl={playbackUrl} playbackType={playbackType} sourceHost={sourceHost} autoPlay={false} onVideoElement={setContentVideo} playerOverlay={<ExoclickVastAd contentVideoRef={contentVideoRef} videoId={video.id}/>} onViewCounted={() => setViewCount((current) => current + 1)}/>
         <div className="watch-page-details">
           <div className="watch-page-title"><h1>{video.title}</h1><span className="public-view-count">{formatPublicViewCount(viewCount)} views</span></div>
           {video.description && <p>{video.description}</p>}

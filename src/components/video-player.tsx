@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { Command, Film } from "lucide-react";
 import { recordPublicVideoView } from "@/hooks/use-library";
-import { ExoclickVastAd } from "@/components/exoclick-vast-ad";
 import type { VideoRecord } from "@/hooks/use-library";
 import { getPlaybackFailureReason, probeVideoSource, supportsNativeHls } from "@/lib/video-playback";
 import type { SourceProbe, VideoSourceType } from "@/lib/video-playback";
@@ -21,7 +21,7 @@ function detectNativeAudioAvailability(element: HTMLVideoElement): ReelAudioAvai
   return "unknown";
 }
 
-export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onViewCounted, onPlaybackStatusChange, onAudioAvailabilityChange, loadingPresentation = "spinner", muted = false, reelAudio = false, controls = true, preloadOnly = false, enableExoclickAd = false }: {
+export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onViewCounted, onPlaybackStatusChange, onAudioAvailabilityChange, loadingPresentation = "spinner", muted = false, reelAudio = false, controls = true, preloadOnly = false, autoPlay, onVideoElement, playerOverlay }: {
   video: WatchVideo;
   playbackUrl: string;
   playbackType: VideoSourceType;
@@ -34,8 +34,12 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
   reelAudio?: boolean;
   controls?: boolean;
   preloadOnly?: boolean;
-  enableExoclickAd?: boolean;
+  autoPlay?: boolean;
+  onVideoElement?: (element: HTMLVideoElement | null) => void;
+  playerOverlay?: ReactNode;
 }) {
+  const shouldAutoplay = autoPlay ?? (!preloadOnly && !reelAudio);
+  const allowAutomaticPlayback = autoPlay !== false;
   const [failure, setFailure] = useState("");
   const [loading, setLoading] = useState(true);
   const [attempt, setAttempt] = useState(0);
@@ -58,6 +62,10 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
   const activePlayAttemptRef = useRef(false);
   const playbackAttemptIdRef = useRef(0);
   const [autoplayMuted, setAutoplayMuted] = useState(false);
+  const setVideoElement = useCallback((element: HTMLVideoElement | null) => {
+    videoRef.current = element;
+    onVideoElement?.(element);
+  }, [onVideoElement]);
   preloadOnlyRef.current = preloadOnly;
   playbackStatusCallbackRef.current = onPlaybackStatusChange;
   audioAvailabilityCallbackRef.current = onAudioAvailabilityChange;
@@ -152,7 +160,7 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
             hls.on(HlsPlayer.Events.MEDIA_ATTACHED, () => { lifecycle.mediaAttached = true; if (process.env.NODE_ENV === "development") console.info("[HLS MEDIA_ATTACHED]", { sourceHost, attached: true }); });
             hls.on(HlsPlayer.Events.MANIFEST_LOADING, () => { lifecycle.manifestLoading = true; if (process.env.NODE_ENV === "development") console.info("[HLS MANIFEST_LOADING]", { sourceHost, request: "same-origin relay" }); });
             hls.on(HlsPlayer.Events.MANIFEST_LOADED, (_event, data) => { lifecycle.manifestLoaded = true; if (process.env.NODE_ENV === "development") console.info("[HLS MANIFEST_LOADED]", { sourceHost, levels: data.levels?.length ?? 0 }); });
-            hls.on(HlsPlayer.Events.MANIFEST_PARSED, (_event, data) => { lifecycle.manifestParsed = true; if (!active) return; const ready = hasPlayableMedia(element); setLoading(!ready); playbackStatusCallbackRef.current?.(video.id, ready ? "ready" : "loading"); const hasAudio = data.audio || data.altAudio || data.audioTracks.length > 0 || data.levels.some((level) => Boolean(level.audioCodec)); publishAudioAvailability(hasAudio ? "available" : "none"); if (process.env.NODE_ENV === "development") console.info("[HLS MANIFEST_PARSED]", { sourceHost, levels: data.levels?.length ?? 0 }); if (preloadOnlyRef.current) startSilentWarm(element); else startActivePlayback(element); });
+            hls.on(HlsPlayer.Events.MANIFEST_PARSED, (_event, data) => { lifecycle.manifestParsed = true; if (!active) return; const ready = hasPlayableMedia(element); setLoading(!ready); playbackStatusCallbackRef.current?.(video.id, ready ? "ready" : "loading"); const hasAudio = data.audio || data.altAudio || data.audioTracks.length > 0 || data.levels.some((level) => Boolean(level.audioCodec)); publishAudioAvailability(hasAudio ? "available" : "none"); if (process.env.NODE_ENV === "development") console.info("[HLS MANIFEST_PARSED]", { sourceHost, levels: data.levels?.length ?? 0 }); if (preloadOnlyRef.current) startSilentWarm(element); else if (allowAutomaticPlayback) startActivePlayback(element); });
             hls.on(HlsPlayer.Events.FRAG_LOADING, (_event, data) => { lifecycle.fragLoading = true; if (process.env.NODE_ENV === "development") console.info("[HLS FRAG_LOADING]", { sourceHost, level: data.frag.level, sequence: data.frag.sn }); });
             hls.on(HlsPlayer.Events.FRAG_LOADED, (_event, data) => { lifecycle.fragLoaded = true; if (process.env.NODE_ENV === "development") console.info("[HLS FRAG_LOADED]", { sourceHost, level: data.frag.level, sequence: data.frag.sn }); });
             hls.on(HlsPlayer.Events.ERROR, (_event, data) => {
@@ -167,7 +175,7 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
           const factory = dashModule.MediaPlayer() as unknown as { create: () => typeof dash };
           dash = factory.create();
           if (!dash) { fail({ type: "DASH", details: "DASH player could not be initialized", status: null }); return; }
-          dash.initialize(element, playbackUrl, !preloadOnly);
+          dash.initialize(element, playbackUrl, allowAutomaticPlayback && !preloadOnly);
           dash.on(dashModule.MediaPlayer.events.ERROR, (event) => { const info = event && typeof event === "object" ? event as { error?: { message?: string }; code?: number; message?: string } : {}; fail({ type: "DASH", details: info.error?.message ?? info.message ?? "DASH playback error", status: info.code ?? null }); });
         } else {
           element.src = playbackUrl;
@@ -180,7 +188,7 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
       }
     })();
     return () => { active = false; hlsManagedRef.current = false; hlsRef.current?.destroy(); hlsRef.current = null; dash?.reset(); element.pause(); element.removeAttribute("src"); element.load(); };
-  }, [playbackUrl, playbackType, sourceHost, attempt]);
+  }, [playbackUrl, playbackType, sourceHost, attempt, allowAutomaticPlayback, shouldAutoplay]);
 
   useEffect(() => {
     const wasPreloading = previousPreloadModeRef.current;
@@ -351,5 +359,5 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
     }
   }
   const diagnosticLines = [`Source: ${sourceHost}`, `Format: ${sourceType.toUpperCase()}`, diagnostics.hlsStatus !== null ? `HTTP status: ${diagnostics.hlsStatus}` : null, diagnostics.hlsType ? `Player category: ${diagnostics.hlsType}` : null];
-  return <div className={`player-frame${preloadOnly ? " preload-only" : ""}`} data-source-type={sourceType} aria-hidden={preloadOnly || undefined}><video ref={videoRef} controls={controls} autoPlay={!preloadOnly && !reelAudio} playsInline muted={preloadOnly || muted || (reelAudio && autoplayMuted)} preload="metadata" poster={video.thumbnail_url || undefined} onLoadedMetadata={(event) => { const element = event.currentTarget; if (element.closest(".reel-media, .reels-player-layer") && element.videoWidth && element.videoHeight) element.dataset.reelOrientation = element.videoHeight > element.videoWidth ? "portrait" : "landscape"; publishNativeAudioAvailability(element); const ready = hasPlayableMedia(element); setLoading(!ready); playbackStatusCallbackRef.current?.(video.id, ready ? "ready" : "loading"); if (preloadOnlyRef.current) startSilentWarm(element); }} onCanPlay={(event) => { publishNativeAudioAvailability(event.currentTarget); setLoading(false); playbackStatusCallbackRef.current?.(video.id, "ready"); if (preloadOnlyRef.current) startSilentWarm(event.currentTarget); }} onPlaying={handlePlaybackStarted} onWaiting={(event) => { publishNativeAudioAvailability(event.currentTarget); const ready = hasPlayableMedia(event.currentTarget); setLoading(!ready); playbackStatusCallbackRef.current?.(video.id, ready ? "ready" : "loading"); }} onTimeUpdate={(event) => publishNativeAudioAvailability(event.currentTarget)} onError={handleMediaError}/>{enableExoclickAd && !preloadOnly && <ExoclickVastAd contentVideoRef={videoRef} enabled={enableExoclickAd} videoId={video.id}/ >}{loading && !failure && loadingPresentation === "spinner" && <div className="player-loading"><span className="spinner"/><span>Loading video...</span></div>}{failure && <div className="player-error"><Film size={24}/><strong>Unable to play this video</strong><span className="player-reason">{failure}</span><span className="player-diagnostics">{diagnosticLines.join(" · ")}</span><button type="button" onClick={() => { setFailure(""); setAttempt((current) => current + 1); }}>Try again</button></div>}<span className="player-hint"><Command size={12}/> SPACE TO PLAY</span></div>;
+  return <div className={`player-frame${preloadOnly ? " preload-only" : ""}`} data-source-type={sourceType} aria-hidden={preloadOnly || undefined}><video ref={setVideoElement} controls={controls} autoPlay={shouldAutoplay} playsInline muted={preloadOnly || muted || (reelAudio && autoplayMuted)} preload="metadata" poster={video.thumbnail_url || undefined} onLoadedMetadata={(event) => { const element = event.currentTarget; if (element.closest(".reel-media, .reels-player-layer") && element.videoWidth && element.videoHeight) element.dataset.reelOrientation = element.videoHeight > element.videoWidth ? "portrait" : "landscape"; publishNativeAudioAvailability(element); const ready = hasPlayableMedia(element); setLoading(!ready); playbackStatusCallbackRef.current?.(video.id, ready ? "ready" : "loading"); if (preloadOnlyRef.current) startSilentWarm(element); }} onCanPlay={(event) => { publishNativeAudioAvailability(event.currentTarget); setLoading(false); playbackStatusCallbackRef.current?.(video.id, "ready"); if (preloadOnlyRef.current) startSilentWarm(event.currentTarget); }} onPlaying={handlePlaybackStarted} onWaiting={(event) => { publishNativeAudioAvailability(event.currentTarget); const ready = hasPlayableMedia(event.currentTarget); setLoading(!ready); playbackStatusCallbackRef.current?.(video.id, ready ? "ready" : "loading"); }} onTimeUpdate={(event) => publishNativeAudioAvailability(event.currentTarget)} onError={handleMediaError}/>{playerOverlay}{loading && !failure && loadingPresentation === "spinner" && <div className="player-loading"><span className="spinner"/><span>Loading video...</span></div>}{failure && <div className="player-error"><Film size={24}/><strong>Unable to play this video</strong><span className="player-reason">{failure}</span><span className="player-diagnostics">{diagnosticLines.join(" · ")}</span><button type="button" onClick={() => { setFailure(""); setAttempt((current) => current + 1); }}>Try again</button></div>}<span className="player-hint"><Command size={12}/> SPACE TO PLAY</span></div>;
 }

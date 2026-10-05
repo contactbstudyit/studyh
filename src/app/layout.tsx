@@ -18,6 +18,11 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Stories worth staying for",
   description: "A collection of considered films and stories.",
+  verification: {
+    other: {
+      ba509a24ce29209ed2e5d324d631fa0acb5fc33b: "ba509a24ce29209ed2e5d324d631fa0acb5fc33b",
+    },
+  },
 };
 
 export const viewport: Viewport = {

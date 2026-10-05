@@ -16,6 +16,7 @@ function detectNativeAudioAvailability(element: HTMLVideoElement): ReelAudioAvai
   if (typeof media.mozHasAudio === "boolean") return media.mozHasAudio ? "available" : "none";
   if (media.audioTracks && element.readyState >= HTMLMediaElement.HAVE_METADATA) return media.audioTracks.length > 0 ? "available" : "none";
   if (typeof media.webkitAudioDecodedByteCount === "number" && media.webkitAudioDecodedByteCount > 0) return "available";
+  if (typeof media.webkitAudioDecodedByteCount === "number" && element.currentTime >= 1 && element.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) return "none";
   return "unknown";
 }
 
@@ -52,6 +53,8 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
   const audioAvailabilityRef = useRef<ReelAudioAvailability>("unknown");
   const reelAudioRef = useRef(reelAudio);
   const autoplayMutedRef = useRef(false);
+  const activePlayAttemptRef = useRef(false);
+  const playbackAttemptIdRef = useRef(0);
   const [autoplayMuted, setAutoplayMuted] = useState(false);
   preloadOnlyRef.current = preloadOnly;
   playbackStatusCallbackRef.current = onPlaybackStatusChange;
@@ -72,6 +75,8 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
     playbackReportedRef.current = false;
     preloadWarmStartedRef.current = false;
     autoplayMutedRef.current = false;
+    activePlayAttemptRef.current = false;
+    playbackAttemptIdRef.current += 1;
     setAutoplayMuted(false);
     audioAvailabilityRef.current = "unknown";
     audioAvailabilityCallbackRef.current?.(video.id, "unknown");
@@ -185,6 +190,8 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
     const hls = hlsRef.current;
     const defaults = hlsBufferDefaultsRef.current;
     if (preloadOnly) {
+      playbackAttemptIdRef.current += 1;
+      activePlayAttemptRef.current = false;
       autoplayMutedRef.current = false;
       setAutoplayMuted(false);
       element.pause();
@@ -246,30 +253,40 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
     if (status !== "unknown") publishAudioAvailability(status);
   }
 
-  function retryAfterAutoplayPolicyRejection(element: HTMLVideoElement, error: unknown) {
-    if (!reelAudioRef.current || preloadOnlyRef.current || !error || typeof error !== "object" || !("name" in error) || error.name !== "NotAllowedError") return;
-    if (!autoplayMutedRef.current) {
-      autoplayMutedRef.current = true;
-      setAutoplayMuted(true);
-    }
-    element.volume = 1;
-    element.muted = true;
-    void element.play().then(() => setLoading(false)).catch(() => {});
-  }
-
   function startActivePlayback(element: HTMLVideoElement) {
     if (preloadOnlyRef.current) return;
     if (!reelAudioRef.current) {
       void element.play().catch(() => {});
       return;
     }
+    if (activePlayAttemptRef.current) return;
+    const attemptId = ++playbackAttemptIdRef.current;
+    activePlayAttemptRef.current = true;
     element.volume = 1;
     element.muted = autoplayMutedRef.current;
     void element.play().then(() => {
+      if (attemptId !== playbackAttemptIdRef.current) return;
       setLoading(false);
       element.volume = 1;
       element.muted = autoplayMutedRef.current;
-    }).catch((error) => retryAfterAutoplayPolicyRejection(element, error));
+      activePlayAttemptRef.current = false;
+    }).catch((error) => {
+      if (attemptId !== playbackAttemptIdRef.current) return;
+      if (error && typeof error === "object" && "name" in error && error.name === "NotAllowedError") {
+        if (autoplayMutedRef.current) { activePlayAttemptRef.current = false; return; }
+        autoplayMutedRef.current = true;
+        setAutoplayMuted(true);
+        element.volume = 1;
+        element.muted = true;
+        void element.play().then(() => {
+          if (attemptId === playbackAttemptIdRef.current) setLoading(false);
+        }).catch(() => {}).finally(() => {
+          if (attemptId === playbackAttemptIdRef.current) activePlayAttemptRef.current = false;
+        });
+        return;
+      }
+      activePlayAttemptRef.current = false;
+    });
   }
 
   useEffect(() => {
@@ -277,11 +294,13 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
     const unlockAudio = () => {
       const element = videoRef.current;
       if (!element || preloadOnlyRef.current || !autoplayMutedRef.current) return;
+      playbackAttemptIdRef.current += 1;
       autoplayMutedRef.current = false;
       setAutoplayMuted(false);
       element.volume = 1;
       element.muted = false;
-      void element.play().catch((error) => retryAfterAutoplayPolicyRejection(element, error));
+      activePlayAttemptRef.current = false;
+      startActivePlayback(element);
     };
     document.addEventListener("pointerdown", unlockAudio, true);
     document.addEventListener("keydown", unlockAudio, true);
@@ -330,5 +349,5 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
     }
   }
   const diagnosticLines = [`Source: ${sourceHost}`, `Format: ${sourceType.toUpperCase()}`, diagnostics.hlsStatus !== null ? `HTTP status: ${diagnostics.hlsStatus}` : null, diagnostics.hlsType ? `Player category: ${diagnostics.hlsType}` : null];
-  return <div className={`player-frame${preloadOnly ? " preload-only" : ""}`} data-source-type={sourceType} aria-hidden={preloadOnly || undefined}><video ref={videoRef} controls={controls} autoPlay={!preloadOnly && !reelAudio} playsInline muted={preloadOnly || muted || (reelAudio && autoplayMuted)} preload="metadata" poster={video.thumbnail_url || undefined} onLoadedMetadata={(event) => { const element = event.currentTarget; if (element.closest(".reel-media, .reels-player-layer") && element.videoWidth && element.videoHeight) element.dataset.reelOrientation = element.videoHeight > element.videoWidth ? "portrait" : "landscape"; publishNativeAudioAvailability(element); const ready = hasPlayableMedia(element); setLoading(!ready); playbackStatusCallbackRef.current?.(video.id, ready ? "ready" : "loading"); if (preloadOnlyRef.current) startSilentWarm(element); }} onCanPlay={(event) => { publishNativeAudioAvailability(event.currentTarget); setLoading(false); playbackStatusCallbackRef.current?.(video.id, "ready"); if (preloadOnlyRef.current) startSilentWarm(event.currentTarget); }} onPlaying={handlePlaybackStarted} onWaiting={(event) => { publishNativeAudioAvailability(event.currentTarget); const ready = hasPlayableMedia(event.currentTarget); setLoading(!ready); playbackStatusCallbackRef.current?.(video.id, ready ? "ready" : "loading"); }} onError={handleMediaError}/>{loading && !failure && loadingPresentation === "spinner" && <div className="player-loading"><span className="spinner"/><span>Loading video...</span></div>}{failure && <div className="player-error"><Film size={24}/><strong>Unable to play this video</strong><span className="player-reason">{failure}</span><span className="player-diagnostics">{diagnosticLines.join(" · ")}</span><button type="button" onClick={() => { setFailure(""); setAttempt((current) => current + 1); }}>Try again</button></div>}<span className="player-hint"><Command size={12}/> SPACE TO PLAY</span></div>;
+  return <div className={`player-frame${preloadOnly ? " preload-only" : ""}`} data-source-type={sourceType} aria-hidden={preloadOnly || undefined}><video ref={videoRef} controls={controls} autoPlay={!preloadOnly && !reelAudio} playsInline muted={preloadOnly || muted || (reelAudio && autoplayMuted)} preload="metadata" poster={video.thumbnail_url || undefined} onLoadedMetadata={(event) => { const element = event.currentTarget; if (element.closest(".reel-media, .reels-player-layer") && element.videoWidth && element.videoHeight) element.dataset.reelOrientation = element.videoHeight > element.videoWidth ? "portrait" : "landscape"; publishNativeAudioAvailability(element); const ready = hasPlayableMedia(element); setLoading(!ready); playbackStatusCallbackRef.current?.(video.id, ready ? "ready" : "loading"); if (preloadOnlyRef.current) startSilentWarm(element); }} onCanPlay={(event) => { publishNativeAudioAvailability(event.currentTarget); setLoading(false); playbackStatusCallbackRef.current?.(video.id, "ready"); if (preloadOnlyRef.current) startSilentWarm(event.currentTarget); }} onPlaying={handlePlaybackStarted} onWaiting={(event) => { publishNativeAudioAvailability(event.currentTarget); const ready = hasPlayableMedia(event.currentTarget); setLoading(!ready); playbackStatusCallbackRef.current?.(video.id, ready ? "ready" : "loading"); }} onTimeUpdate={(event) => publishNativeAudioAvailability(event.currentTarget)} onError={handleMediaError}/>{loading && !failure && loadingPresentation === "spinner" && <div className="player-loading"><span className="spinner"/><span>Loading video...</span></div>}{failure && <div className="player-error"><Film size={24}/><strong>Unable to play this video</strong><span className="player-reason">{failure}</span><span className="player-diagnostics">{diagnosticLines.join(" · ")}</span><button type="button" onClick={() => { setFailure(""); setAttempt((current) => current + 1); }}>Try again</button></div>}<span className="player-hint"><Command size={12}/> SPACE TO PLAY</span></div>;
 }

@@ -399,6 +399,11 @@ nextjs-portal {
   .reel-media { position: absolute; z-index: 0; top: 0; right: 0; bottom: calc(68px + env(safe-area-inset-bottom,0px)); left: 0; width: 100%; height: auto; border: 0; border-radius: 0; }
   .reel-media .player-frame { position: absolute; inset: 0; width: 100%; height: 100%; max-height: none; aspect-ratio: auto; overflow: hidden; border-radius: 0; }
   .reels-player-layer { position: absolute; z-index: 2; top: 0; left: 0; width: 100%; pointer-events: none; }
+  .vast-ad-player { position: absolute; z-index: 5; right: 0; left: 0; visibility: hidden; height: calc(100dvh - 68px - env(safe-area-inset-bottom,0px)); overflow: hidden; background: #080808; pointer-events: none; }
+  .vast-ad-player.active { visibility: visible; pointer-events: auto; }
+  .vast-ad-player video { width: 100%; height: 100%; object-fit: contain; }
+  .vast-ad-label { position: absolute; top: calc(env(safe-area-inset-top,0px) + 14px); left: 16px; padding: 6px 9px; border-radius: 4px; background: rgba(0,0,0,.65); color: #fff; font-size: 11px; }
+  .vast-ad-loading { position: absolute; inset: 0; display: grid; align-content: center; justify-items: center; gap: 12px; background: #080808; color: #fff; font-size: 13px; }
   .reel-player-slot { position: absolute; right: 0; left: 0; height: calc(100dvh - 68px - env(safe-area-inset-bottom,0px)); pointer-events: none; }
   .reel-player-slot.active { z-index: 1; }
   .reel-player-slot.preparing { z-index: 0; }

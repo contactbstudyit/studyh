@@ -20,12 +20,13 @@ function detectNativeAudioAvailability(element: HTMLVideoElement): ReelAudioAvai
   return "unknown";
 }
 
-export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onViewCounted, onPlaybackStatusChange, onAudioAvailabilityChange, loadingPresentation = "spinner", muted = false, reelAudio = false, controls = true, preloadOnly = false }: {
+export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onViewCounted, onPlaybackStarted, onPlaybackStatusChange, onAudioAvailabilityChange, loadingPresentation = "spinner", muted = false, reelAudio = false, controls = true, preloadOnly = false, suspended = false }: {
   video: WatchVideo;
   playbackUrl: string;
   playbackType: VideoSourceType;
   sourceHost: string;
   onViewCounted?: () => void;
+  onPlaybackStarted?: (videoId: string) => void;
   onPlaybackStatusChange?: (videoId: string, status: PlaybackStatus) => void;
   onAudioAvailabilityChange?: (videoId: string, availability: ReelAudioAvailability) => void;
   loadingPresentation?: "spinner" | "external";
@@ -33,6 +34,7 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
   reelAudio?: boolean;
   controls?: boolean;
   preloadOnly?: boolean;
+  suspended?: boolean;
 }) {
   const [failure, setFailure] = useState("");
   const [loading, setLoading] = useState(true);
@@ -50,6 +52,7 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
   const preloadWarmStartedRef = useRef(false);
   const playbackStatusCallbackRef = useRef(onPlaybackStatusChange);
   const audioAvailabilityCallbackRef = useRef(onAudioAvailabilityChange);
+  const playbackStartedCallbackRef = useRef(onPlaybackStarted);
   const audioAvailabilityRef = useRef<ReelAudioAvailability>("unknown");
   const reelAudioRef = useRef(reelAudio);
   const autoplayMutedRef = useRef(false);
@@ -59,6 +62,7 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
   preloadOnlyRef.current = preloadOnly;
   playbackStatusCallbackRef.current = onPlaybackStatusChange;
   audioAvailabilityCallbackRef.current = onAudioAvailabilityChange;
+  playbackStartedCallbackRef.current = onPlaybackStarted;
   reelAudioRef.current = reelAudio;
   const playbackReportedRef = useRef(false);
   const viewedVideoIdRef = useRef<string | null>(null);
@@ -236,6 +240,13 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
     startActivePlayback(element);
   }, [preloadOnly]);
 
+  useEffect(() => {
+    const element = videoRef.current;
+    if (!element || preloadOnly) return;
+    if (suspended) element.pause();
+    else startActivePlayback(element);
+  }, [suspended, preloadOnly]);
+
   function hasPlayableMedia(element: HTMLVideoElement) {
     const buffered = element.buffered.length > 0 && element.buffered.end(element.buffered.length - 1) - element.currentTime > 0.15;
     return element.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA || buffered;
@@ -341,12 +352,14 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
       playbackStatusCallbackRef.current?.(video.id, hasPlayableMedia(element) ? "ready" : "loading");
       return;
     }
+    if (suspended) { videoRef.current?.pause(); return; }
     playbackStatusCallbackRef.current?.(video.id, "ready");
     if (!playbackReportedRef.current && process.env.NODE_ENV === "development") { playbackReportedRef.current = true; console.info("[video-playback] playback confirmed", { source: sourceHost, format: sourceType.toUpperCase(), relay: "same-origin" }); }
     if (viewedVideoIdRef.current !== video.id) {
       viewedVideoIdRef.current = video.id;
       void recordPublicVideoView(video.id).then((counted) => { if (counted) onViewCounted?.(); });
     }
+    playbackStartedCallbackRef.current?.(video.id);
   }
   const diagnosticLines = [`Source: ${sourceHost}`, `Format: ${sourceType.toUpperCase()}`, diagnostics.hlsStatus !== null ? `HTTP status: ${diagnostics.hlsStatus}` : null, diagnostics.hlsType ? `Player category: ${diagnostics.hlsType}` : null];
   return <div className={`player-frame${preloadOnly ? " preload-only" : ""}`} data-source-type={sourceType} aria-hidden={preloadOnly || undefined}><video ref={videoRef} controls={controls} autoPlay={!preloadOnly && !reelAudio} playsInline muted={preloadOnly || muted || (reelAudio && autoplayMuted)} preload="metadata" poster={video.thumbnail_url || undefined} onLoadedMetadata={(event) => { const element = event.currentTarget; if (element.closest(".reel-media, .reels-player-layer") && element.videoWidth && element.videoHeight) element.dataset.reelOrientation = element.videoHeight > element.videoWidth ? "portrait" : "landscape"; publishNativeAudioAvailability(element); const ready = hasPlayableMedia(element); setLoading(!ready); playbackStatusCallbackRef.current?.(video.id, ready ? "ready" : "loading"); if (preloadOnlyRef.current) startSilentWarm(element); }} onCanPlay={(event) => { publishNativeAudioAvailability(event.currentTarget); setLoading(false); playbackStatusCallbackRef.current?.(video.id, "ready"); if (preloadOnlyRef.current) startSilentWarm(event.currentTarget); }} onPlaying={handlePlaybackStarted} onWaiting={(event) => { publishNativeAudioAvailability(event.currentTarget); const ready = hasPlayableMedia(event.currentTarget); setLoading(!ready); playbackStatusCallbackRef.current?.(video.id, ready ? "ready" : "loading"); }} onTimeUpdate={(event) => publishNativeAudioAvailability(event.currentTarget)} onError={handleMediaError}/>{loading && !failure && loadingPresentation === "spinner" && <div className="player-loading"><span className="spinner"/><span>Loading video...</span></div>}{failure && <div className="player-error"><Film size={24}/><strong>Unable to play this video</strong><span className="player-reason">{failure}</span><span className="player-diagnostics">{diagnosticLines.join(" · ")}</span><button type="button" onClick={() => { setFailure(""); setAttempt((current) => current + 1); }}>Try again</button></div>}<span className="player-hint"><Command size={12}/> SPACE TO PLAY</span></div>;

@@ -8,7 +8,6 @@ import MobileBottomNavigation from "@/components/mobile-bottom-navigation";
 import type { VideoRecord } from "@/hooks/use-library";
 import PublicViewCount from "@/components/public-view-count";
 import type { VideoSourceType } from "@/lib/video-playback";
-import { VastAdPlayer } from "@/components/vast-ad-player";
 
 type ReelVideo = Omit<VideoRecord, "video_url" | "views" | "display_view_count" | "published_at" | "display_views">;
 type ReelItem = { video: ReelVideo; playbackUrl: string; playbackType: VideoSourceType; sourceHost: string; displayViews: number };
@@ -17,10 +16,6 @@ type PlayerSlot = "a" | "b";
 type PlayerSlots = Record<PlayerSlot, ReelItem | null>;
 type ReelPlaybackStatus = "loading" | "ready" | "error";
 type ReelAudioAvailability = "unknown" | "available" | "none";
-
-function reelAdDiagnostic(event: string, details: Record<string, number | string> = {}) {
-  if (process.env.NODE_ENV === "development") console.info("[reel-ad-diagnostic]", event, details);
-}
 
 function otherPlayerSlot(slot: PlayerSlot): PlayerSlot {
   return slot === "a" ? "b" : "a";
@@ -39,23 +34,12 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
   const [activePlayerSlot, setActivePlayerSlot] = useState<PlayerSlot>("a");
   const [activePlaybackStatus, setActivePlaybackStatus] = useState<ReelPlaybackStatus>("loading");
   const [activeAudioAvailability, setActiveAudioAvailability] = useState<ReelAudioAvailability>("unknown");
-  const [adRequested, setAdRequested] = useState(false);
-  const [adReady, setAdReady] = useState(false);
-  const [adPlaying, setAdPlaying] = useState(false);
-  const [adIndex, setAdIndex] = useState<number | null>(null);
   const trackRef = useRef<HTMLDivElement>(null);
   const loadingRef = useRef(false);
   const videosRef = useRef(videos);
   const activeIndexRef = useRef(activeIndex);
   const playerSlotsRef = useRef(playerSlots);
   const activePlayerSlotRef = useRef(activePlayerSlot);
-  const adRequestedRef = useRef(false);
-  const adReadyRef = useRef(false);
-  const adPlayingRef = useRef(false);
-  const adIndexRef = useRef<number | null>(null);
-  const consumedReelsRef = useRef(new Set<string>());
-  const consumedCountRef = useRef(0);
-  const nextAdAtRef = useRef(3 + Math.floor(Math.random() * 3));
   const slotPlaybackStatusRef = useRef<Record<PlayerSlot, ReelPlaybackStatus>>({ a: "loading", b: "loading" });
   const slotAudioAvailabilityRef = useRef<Record<PlayerSlot, { videoId: string | null; availability: ReelAudioAvailability }>>({
     a: { videoId: null, availability: "unknown" },
@@ -66,31 +50,10 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
   playerSlotsRef.current = playerSlots;
   activePlayerSlotRef.current = activePlayerSlot;
 
-  const activateReel = useCallback((index: number, bypassAd = false) => {
+  const activateReel = useCallback((index: number) => {
     const items = videosRef.current;
     const target = items[index];
     if (!target) return;
-
-    if (adRequestedRef.current && !adReadyRef.current && index !== activeIndexRef.current) {
-      reelAdDiagnostic("swipe while VAST request is pending; normal Reel continues", { consumed: consumedCountRef.current, threshold: nextAdAtRef.current });
-    }
-
-    if (adPlayingRef.current) {
-      if (index === adIndexRef.current) return;
-      reelAdDiagnostic("pending ad cancelled by swipe", { consumed: consumedCountRef.current, threshold: nextAdAtRef.current });
-      adPlayingRef.current = false; setAdPlaying(false);
-      adReadyRef.current = false; setAdReady(false);
-      adRequestedRef.current = false; setAdRequested(false);
-      adIndexRef.current = null; setAdIndex(null);
-      nextAdAtRef.current = consumedCountRef.current + 3 + Math.floor(Math.random() * 3);
-    }
-
-    if (!bypassAd && mobileViewport && index !== activeIndexRef.current && !adPlayingRef.current && adReadyRef.current && consumedCountRef.current >= nextAdAtRef.current) {
-      reelAdDiagnostic("ready ad activated for next Reel", { consumed: consumedCountRef.current, threshold: nextAdAtRef.current });
-      adIndexRef.current = index; setAdIndex(index);
-      adPlayingRef.current = true; setAdPlaying(true);
-      return;
-    }
 
     if (mobileViewport && index !== activeIndexRef.current) {
       const activeSlot = activePlayerSlotRef.current;
@@ -124,42 +87,11 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
     }
   }, [mobileViewport]);
 
-  const onNormalPlaybackStarted = useCallback((videoId: string) => {
-    if (consumedReelsRef.current.has(videoId)) return;
-    consumedReelsRef.current.add(videoId);
-    consumedCountRef.current += 1;
-    reelAdDiagnostic("normal Reel playback consumed", { consumed: consumedCountRef.current, threshold: nextAdAtRef.current });
-    if (mobileViewport && !adRequestedRef.current && consumedCountRef.current >= nextAdAtRef.current) {
-      adRequestedRef.current = true;
-      reelAdDiagnostic("frequency threshold reached; VAST request scheduled", { consumed: consumedCountRef.current, threshold: nextAdAtRef.current });
-      setAdRequested(true);
-    }
-  }, [mobileViewport]);
-
-  const onAdReady = useCallback(() => {
-    adReadyRef.current = true;
-    reelAdDiagnostic("VAST ad is ready for presentation", { consumed: consumedCountRef.current, threshold: nextAdAtRef.current });
-    setAdReady(true);
-  }, []);
-
-  const onAdFinish = useCallback(() => {
-    const pendingIndex = adIndexRef.current;
-    adPlayingRef.current = false; setAdPlaying(false);
-    adReadyRef.current = false; setAdReady(false);
-    adRequestedRef.current = false; setAdRequested(false);
-    adIndexRef.current = null; setAdIndex(null);
-    nextAdAtRef.current = consumedCountRef.current + 3 + Math.floor(Math.random() * 3);
-    if (pendingIndex !== null) activateReel(pendingIndex, true);
-  }, [activateReel]);
-
   const loadPage = useCallback(async (nextPage: number, replace = false) => {
     if (loadingRef.current) return;
     loadingRef.current = true;
     setError("");
     if (replace) {
-      adRequestedRef.current = false; adReadyRef.current = false; adPlayingRef.current = false; adIndexRef.current = null;
-      consumedReelsRef.current.clear(); consumedCountRef.current = 0; nextAdAtRef.current = 3 + Math.floor(Math.random() * 3);
-      setAdRequested(false); setAdReady(false); setAdPlaying(false); setAdIndex(null);
       setLoading(true);
       setVideos([]);
       videosRef.current = [];
@@ -218,8 +150,6 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
   useEffect(() => {
     if (mobileViewport !== true) {
       if (mobileViewport === false && (playerSlotsRef.current.a || playerSlotsRef.current.b)) {
-        adRequestedRef.current = false; adReadyRef.current = false; adPlayingRef.current = false; adIndexRef.current = null;
-        setAdRequested(false); setAdReady(false); setAdPlaying(false); setAdIndex(null);
         playerSlotsRef.current = { a: null, b: null };
         setPlayerSlots({ a: null, b: null });
         activePlayerSlotRef.current = "a";
@@ -326,13 +256,12 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
                  const isActive = slot === activePlayerSlot;
                   const slotIndex = videos.findIndex((video) => video.video.id === item.video.id);
                   return <div className={`reel-player-slot ${isActive ? "active" : "preparing"}`} aria-hidden={!isActive} key={slot} style={{ top: `${Math.max(0, slotIndex) * 100}dvh` }}>
-                      <VideoPlayer key={slot} video={item.video} playbackUrl={item.playbackUrl} playbackType={item.playbackType} sourceHost={item.sourceHost} muted={!isActive || adPlaying} reelAudio controls={false} preloadOnly={!isActive} suspended={isActive && adPlaying} loadingPresentation="external" onPlaybackStarted={isActive ? onNormalPlaybackStarted : undefined} onPlaybackStatusChange={(videoId, status) => reportSlotPlaybackStatus(slot, videoId, status)} onAudioAvailabilityChange={(videoId, availability) => reportSlotAudioAvailability(slot, videoId, availability)}/>
+                      <VideoPlayer key={slot} video={item.video} playbackUrl={item.playbackUrl} playbackType={item.playbackType} sourceHost={item.sourceHost} muted={!isActive} reelAudio controls={false} preloadOnly={!isActive} loadingPresentation="external" onPlaybackStatusChange={(videoId, status) => reportSlotPlaybackStatus(slot, videoId, status)} onAudioAvailabilityChange={(videoId, availability) => reportSlotAudioAvailability(slot, videoId, availability)}/>
                     {isActive && <div className={`reels-video-skeleton${activePlaybackStatus === "ready" ? " ready" : activePlaybackStatus === "error" ? " failed" : ""}`} aria-hidden="true"><div className="reels-skeleton-caption"><span className="reels-skeleton-title long"/><span className="reels-skeleton-title short"/><span className="reels-skeleton-views"/></div></div>}
-                     {isActive && !adPlaying && <div className="reel-caption mobile-reel-caption"><h1>{item.video.title}</h1><PublicViewCount count={item.displayViews} className="reel-view-count"/></div>}
+                     {isActive && <div className="reel-caption mobile-reel-caption"><h1>{item.video.title}</h1><PublicViewCount count={item.displayViews} className="reel-view-count"/></div>}
                     {isActive && activeAudioAvailability === "none" && <span className="reel-no-audio" role="img" aria-label="This video has no audio track"><VolumeX size={15}/></span>}
                  </div>;
                 })}
-                {adRequested && <VastAdPlayer start={adPlaying} index={adIndex} onReady={onAdReady} onFinish={onAdFinish}/>}
               </div>}
            </div>}
   </main>;

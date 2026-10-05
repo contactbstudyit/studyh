@@ -18,6 +18,10 @@ type PlayerSlots = Record<PlayerSlot, ReelItem | null>;
 type ReelPlaybackStatus = "loading" | "ready" | "error";
 type ReelAudioAvailability = "unknown" | "available" | "none";
 
+function reelAdDiagnostic(event: string, details: Record<string, number | string> = {}) {
+  if (process.env.NODE_ENV === "development") console.info("[reel-ad-diagnostic]", event, details);
+}
+
 function otherPlayerSlot(slot: PlayerSlot): PlayerSlot {
   return slot === "a" ? "b" : "a";
 }
@@ -67,8 +71,13 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
     const target = items[index];
     if (!target) return;
 
+    if (adRequestedRef.current && !adReadyRef.current && index !== activeIndexRef.current) {
+      reelAdDiagnostic("swipe while VAST request is pending; normal Reel continues", { consumed: consumedCountRef.current, threshold: nextAdAtRef.current });
+    }
+
     if (adPlayingRef.current) {
       if (index === adIndexRef.current) return;
+      reelAdDiagnostic("pending ad cancelled by swipe", { consumed: consumedCountRef.current, threshold: nextAdAtRef.current });
       adPlayingRef.current = false; setAdPlaying(false);
       adReadyRef.current = false; setAdReady(false);
       adRequestedRef.current = false; setAdRequested(false);
@@ -77,6 +86,7 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
     }
 
     if (!bypassAd && mobileViewport && index !== activeIndexRef.current && !adPlayingRef.current && adReadyRef.current && consumedCountRef.current >= nextAdAtRef.current) {
+      reelAdDiagnostic("ready ad activated for next Reel", { consumed: consumedCountRef.current, threshold: nextAdAtRef.current });
       adIndexRef.current = index; setAdIndex(index);
       adPlayingRef.current = true; setAdPlaying(true);
       return;
@@ -118,14 +128,17 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
     if (consumedReelsRef.current.has(videoId)) return;
     consumedReelsRef.current.add(videoId);
     consumedCountRef.current += 1;
+    reelAdDiagnostic("normal Reel playback consumed", { consumed: consumedCountRef.current, threshold: nextAdAtRef.current });
     if (mobileViewport && !adRequestedRef.current && consumedCountRef.current >= nextAdAtRef.current) {
       adRequestedRef.current = true;
+      reelAdDiagnostic("frequency threshold reached; VAST request scheduled", { consumed: consumedCountRef.current, threshold: nextAdAtRef.current });
       setAdRequested(true);
     }
   }, [mobileViewport]);
 
   const onAdReady = useCallback(() => {
     adReadyRef.current = true;
+    reelAdDiagnostic("VAST ad is ready for presentation", { consumed: consumedCountRef.current, threshold: nextAdAtRef.current });
     setAdReady(true);
   }, []);
 

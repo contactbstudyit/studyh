@@ -9,7 +9,7 @@ type ImaManager = {
   init: (width: number, height: number, mode: unknown) => void;
   start: () => void;
   destroy: () => void;
-  addEventListener: (event: unknown, callback: () => void) => void;
+  addEventListener: (event: unknown, callback: (event?: unknown) => void) => void;
 };
 type ImaNamespace = {
   AdDisplayContainer: new (container: HTMLElement, video: HTMLVideoElement) => { initialize: () => void; destroy: () => void };
@@ -20,6 +20,20 @@ type ImaNamespace = {
   AdErrorEvent: { Type: Record<string, unknown> };
   ViewMode: { NORMAL: unknown };
 };
+
+function adDiagnostic(event: string, details: Record<string, boolean | number | string | null> = {}) {
+  if (process.env.NODE_ENV === "development") console.info("[vast-diagnostic]", event, details);
+}
+
+function safeImaError(error: unknown) {
+  if (!error || typeof error !== "object") return { code: null, message: "Unknown IMA error" };
+  const value = error as { getErrorCode?: () => number; getMessage?: () => string };
+  const rawMessage = typeof value.getMessage === "function" ? value.getMessage() : "IMA error";
+  return {
+    code: typeof value.getErrorCode === "function" ? value.getErrorCode() : null,
+    message: rawMessage.replace(/https?:\/\/\S+/gi, "[URL]").slice(0, 240),
+  };
+}
 
 declare global { interface Window { google?: { ima?: ImaNamespace }; __imaScriptPromise?: Promise<void> } }
 
@@ -54,14 +68,37 @@ export function VastAdPlayer({ start, index, onReady, onFinish }: { start: boole
     let manager: ImaManager | null = null;
     let loader: InstanceType<ImaNamespace["AdsLoader"]> | null = null;
     let display: { initialize: () => void; destroy: () => void } | null = null;
-    const finish = () => { if (!alive || finished) return; finished = true; onFinish(); };
+    let creativeLoaded = false;
+    const diagnosticObserver = typeof PerformanceObserver === "undefined" ? null : new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) {
+        const resource = entry as PerformanceResourceTiming & { responseStatus?: number };
+        try {
+          if (new URL(resource.name).hostname === "spitefulmom.com") {
+            adDiagnostic("VAST HTTP response received", { httpStatus: resource.responseStatus ?? null });
+          }
+        } catch { /* Ignore malformed performance entry names. */ }
+      }
+    });
+    diagnosticObserver?.observe({ type: "resource", buffered: true });
+    const finish = (reason = "completed") => {
+      if (!alive || finished) return;
+      finished = true;
+      if (reason === "completed") adDiagnostic("ad sequence finished");
+      else adDiagnostic(reason);
+      onFinish();
+    };
     const initOnGesture = () => {
       if (initialized || !display) return;
-      try { display.initialize(); initialized = true; } catch { /* SDK retries initialization on a later gesture. */ }
+      try { display.initialize(); initialized = true; adDiagnostic("IMA AdDisplayContainer initialized from user gesture"); }
+      catch (error) { adDiagnostic("IMA AdDisplayContainer initialization failed", safeImaError(error)); }
     };
     document.addEventListener("pointerdown", initOnGesture, true);
     document.addEventListener("keydown", initOnGesture, true);
-    const timeout = window.setTimeout(finish, 5500);
+    const timeout = window.setTimeout(() => finish("VAST request/response timeout"), 5500);
+    const onAdVideoPlaying = () => adDiagnostic("ad media element playing", { muted: videoRef.current?.muted ?? true });
+    const onAdVideoError = () => adDiagnostic("ad media element error", { mediaErrorCode: videoRef.current?.error?.code ?? null });
+    videoRef.current?.addEventListener("playing", onAdVideoPlaying);
+    videoRef.current?.addEventListener("error", onAdVideoError);
 
     void loadImaSdk().then(() => {
       if (!alive || !containerRef.current || !videoRef.current) return;
@@ -69,18 +106,35 @@ export function VastAdPlayer({ start, index, onReady, onFinish }: { start: boole
       if (!ima) throw new Error("IMA SDK unavailable");
       display = new ima.AdDisplayContainer(containerRef.current, videoRef.current);
       loader = new ima.AdsLoader(display);
+      adDiagnostic("IMA AdsLoader initialized");
       loader.addEventListener(ima.AdsManagerLoadedEvent.Type.ADS_MANAGER_LOADED, (event) => {
         if (!alive) return;
+        adDiagnostic("IMA AdsManager loaded; VAST XML accepted/parsed by IMA");
         manager = event.getAdsManager(videoRef.current!);
         const events = ima.AdEvent.Type;
-        const onStart = () => { if (!alive) return; playing = true; window.clearTimeout(timeout); setStatus("playing"); };
+        const onStart = () => { if (!alive) return; playing = true; window.clearTimeout(timeout); adDiagnostic("ad started"); setStatus("playing"); };
         manager.addEventListener(events.STARTED, onStart);
-        for (const key of ["COMPLETE", "SKIPPED", "ALL_ADS_COMPLETED", "CONTENT_RESUME_REQUESTED"]) manager.addEventListener(events[key], finish);
-        manager.addEventListener(ima.AdErrorEvent.Type.AD_ERROR, finish);
+        manager.addEventListener(events.LOADED, () => { if (!alive) return; creativeLoaded = true; adDiagnostic("creative selected and loaded by IMA"); });
+        manager.addEventListener(events.COMPLETE, () => finish("ad completed"));
+        manager.addEventListener(events.SKIPPED, () => finish("ad skipped"));
+        manager.addEventListener(events.ALL_ADS_COMPLETED, () => {
+          if (!creativeLoaded) adDiagnostic("no-fill or empty ad response (no creative loaded)");
+          finish("all ads completed");
+        });
+        manager.addEventListener(events.CONTENT_RESUME_REQUESTED, () => finish("content resume requested"));
+        manager.addEventListener(ima.AdErrorEvent.Type.AD_ERROR, (event) => {
+          const details = safeImaError((event as { getError?: () => unknown }).getError?.());
+          adDiagnostic("IMA ad error", details);
+          finish("ad error");
+        });
         setStatus("ready"); onReady();
         if (startRef.current) beginRef.current();
       });
-      loader.addEventListener(ima.AdErrorEvent.Type.AD_ERROR, finish);
+      loader.addEventListener(ima.AdErrorEvent.Type.AD_ERROR, (event) => {
+        const details = safeImaError((event as { getError?: () => unknown }).getError?.());
+        adDiagnostic("IMA AdsLoader error / VAST rejected", details);
+        finish("ad error");
+      });
       const request = new ima.AdsRequest();
       request.adTagUrl = VAST_TAG;
       request.linearAdSlotWidth = Math.max(320, window.innerWidth);
@@ -89,8 +143,12 @@ export function VastAdPlayer({ start, index, onReady, onFinish }: { start: boole
       request.nonLinearAdSlotHeight = Math.floor(request.linearAdSlotHeight / 3);
       request.vastLoadTimeout = 3500;
       request.setAdWillPlayMuted(false);
+      adDiagnostic("VAST request started", { vastLoadTimeoutMs: request.vastLoadTimeout, slotWidth: request.linearAdSlotWidth, slotHeight: request.linearAdSlotHeight });
       loader.requestAds(request);
-    }).catch(finish);
+    }).catch((error: unknown) => {
+      adDiagnostic("IMA SDK load or setup failed", { message: error instanceof Error ? error.message.replace(/https?:\/\/\S+/gi, "[URL]").slice(0, 240) : "Unknown setup error" });
+      finish("IMA SDK setup failure");
+    });
 
     function begin() {
       if (!alive || !manager || finished || began) return;
@@ -99,14 +157,21 @@ export function VastAdPlayer({ start, index, onReady, onFinish }: { start: boole
         initOnGesture();
         manager.init(Math.max(320, window.innerWidth), Math.max(400, window.innerHeight - 68), window.google!.ima!.ViewMode.NORMAL);
         manager.start();
-        window.setTimeout(() => { if (alive && !finished && !playing) finish(); }, 2500);
-      } catch { finish(); }
+        window.setTimeout(() => { if (alive && !finished && !playing) finish("ad start/autoplay timeout"); }, 2500);
+      } catch (error) {
+        adDiagnostic("AdsManager init/start failed", safeImaError(error));
+        finish("ad start failure");
+      }
     }
     beginRef.current = begin;
 
     return () => {
       alive = false;
       window.clearTimeout(timeout);
+      diagnosticObserver?.disconnect();
+      videoRef.current?.removeEventListener("playing", onAdVideoPlaying);
+      videoRef.current?.removeEventListener("error", onAdVideoError);
+      if (!finished) adDiagnostic("ad request/player cancelled and cleaned up");
       document.removeEventListener("pointerdown", initOnGesture, true);
       document.removeEventListener("keydown", initOnGesture, true);
       try { manager?.destroy(); } catch { /* Ignore SDK teardown failures. */ }

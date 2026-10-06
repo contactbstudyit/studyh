@@ -177,6 +177,9 @@ body { background: #000; color: #fff; font-family: var(--font-geist-sans), syste
 .thumbnail-status { margin: -9px 0 0; color: #b8b8b8; font-size: 10px; }
 .thumbnail-status.success { color: #b9cbb8; }
 .thumbnail-status.warning { color: #d2b8a3; }
+.thumbnail-regenerate-dialog .modal-title { margin-bottom: 12px; }
+.thumbnail-regenerate-dialog .modal-title h2 { margin: 7px 0 0; font-size: 22px; font-weight: 600; }
+.thumbnail-regenerate-dialog > p { margin: 0 0 20px; color: #a5a39d; font-size: 12px; line-height: 1.65; }
 .thumbnail-error-detail { color: #a29a91; }
 .video-header-actions { display: flex; align-items: center; gap: 8px; }
 .secondary-action { min-height: 38px; padding: 0 12px; border: 1px solid #343434; border-radius: 2px; background: #101010; color: #ddd; font-size: 10px; white-space: nowrap; cursor: pointer; }

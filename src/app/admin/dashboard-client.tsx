@@ -30,6 +30,9 @@ export default function AdminDashboard() {
   const [generatingThumbnailIds, setGeneratingThumbnailIds] = useState<Set<string>>(() => new Set());
   const [thumbnailBatchRunning, setThumbnailBatchRunning] = useState(false);
   const [thumbnailBatchProgress, setThumbnailBatchProgress] = useState("");
+  const [regenerateAllConfirmOpen, setRegenerateAllConfirmOpen] = useState(false);
+  const thumbnailBatchLock = useRef(false);
+  const thumbnailGenerationLocks = useRef(new Set<string>());
   const [editingVideo, setEditingVideo] = useState<VideoRecord | null>(null);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const statsHook = useLibraryStats();
@@ -136,6 +139,13 @@ export default function AdminDashboard() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [categoryDialog]);
 
+  useEffect(() => {
+    if (!regenerateAllConfirmOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") setRegenerateAllConfirmOpen(false); };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [regenerateAllConfirmOpen]);
+
   async function logout() { await createClient().auth.signOut(); router.replace("/admin/login"); router.refresh(); }
   function openVideo(video?: VideoRecord) {
     setEditingVideo(video ?? null);
@@ -214,40 +224,86 @@ export default function AdminDashboard() {
       if (removed) { await statsHook.refresh(); await categoriesHook.refresh(); }
     } catch (error) { toast.error(error instanceof Error ? error.message : "Could not delete video and thumbnail."); }
   }
-  async function generateThumbnailFor(video: Pick<VideoRecord, "id" | "title" | "video_url" | "duration" | "thumbnail_url">) {
-    if (generatingThumbnailIds.has(video.id)) return false;
+  async function generateThumbnailFor(video: Pick<VideoRecord, "id" | "title" | "video_url" | "duration" | "thumbnail_url">, options: { quiet?: boolean; refreshAfter?: boolean; batchJob?: boolean } = {}) {
+    if (thumbnailBatchLock.current && !options.batchJob) return false;
+    if (thumbnailGenerationLocks.current.has(video.id)) return false;
+    thumbnailGenerationLocks.current.add(video.id);
     setGeneratingThumbnailIds((current) => new Set(current).add(video.id));
     try {
       const image = await generateVideoThumbnail(video.video_url, video.duration);
       const response = await fetch(`/api/admin/videos/${encodeURIComponent(video.id)}/thumbnail`, { method: "POST", headers: { "Content-Type": image.type }, body: image });
       const result = await response.json() as { thumbnail_url?: string; error?: string };
       if (!response.ok || !result.thumbnail_url) throw new Error(result.error || "Thumbnail upload failed");
-      await videosHook.refresh();
-      toast.success(`Thumbnail generated: ${video.title}`);
+      if (options.refreshAfter !== false) await videosHook.refresh();
+      if (!options.quiet) toast.success(`Thumbnail generated: ${video.title}`);
       return true;
     } catch (error) {
       if (process.env.NODE_ENV === "development") console.error("[video-thumbnail] regeneration failed", { videoId: video.id, sourceHost: (() => { try { return new URL(video.video_url).host; } catch { return "invalid URL"; } })(), errorType: error instanceof Error ? error.name : "UnknownError" });
-      toast.error(`Thumbnail could not be generated for ${video.title}. Try again or use a different source.`);
+      if (!options.quiet) toast.error(`Thumbnail could not be generated for ${video.title}. Try again or use a different source.`);
       return false;
     } finally {
+      thumbnailGenerationLocks.current.delete(video.id);
       setGeneratingThumbnailIds((current) => { const next = new Set(current); next.delete(video.id); return next; });
     }
   }
   async function generateMissingThumbnails() {
-    if (thumbnailBatchRunning) return;
-    const missing = await videosHook.getMissingThumbnails();
-    if (!missing) return;
-    if (!missing.length) { toast.success("All videos already have thumbnails."); return; }
+    if (thumbnailBatchLock.current) return;
+    thumbnailBatchLock.current = true;
     setThumbnailBatchRunning(true);
-    let generated = 0;
     try {
+      setThumbnailBatchProgress("Finding videos missing thumbnails…");
+      const missing = await videosHook.getMissingThumbnails();
+      if (!missing) return;
+      if (!missing.length) { toast.success("All videos already have thumbnails."); return; }
+      let generated = 0;
       for (let index = 0; index < missing.length; index++) {
         const video = missing[index];
         setThumbnailBatchProgress(`Generating ${index + 1} of ${missing.length}: ${video.title}`);
-        if (await generateThumbnailFor(video)) generated++;
+        if (await generateThumbnailFor(video, { batchJob: true })) generated++;
       }
       toast.success(`Generated ${generated} of ${missing.length} missing thumbnails.`);
-    } finally { setThumbnailBatchRunning(false); setThumbnailBatchProgress(""); }
+    } finally {
+      thumbnailBatchLock.current = false;
+      setThumbnailBatchRunning(false);
+      setThumbnailBatchProgress("");
+    }
+  }
+  async function regenerateAllThumbnails() {
+    if (thumbnailBatchLock.current) return;
+    thumbnailBatchLock.current = true;
+    setThumbnailBatchRunning(true);
+    let completed = 0;
+    let succeeded = 0;
+    let failed = 0;
+    try {
+      setThumbnailBatchProgress("Loading all videos…");
+      const allVideos = await videosHook.getAllVideosForThumbnailRegeneration();
+      if (!allVideos) { setThumbnailBatchProgress(""); return; }
+      const videosToRegenerate = allVideos.filter((video) => Boolean(video.thumbnail_url));
+      if (videosToRegenerate.length === 0) {
+        toast.success("There are no videos with thumbnails to regenerate.");
+        setThumbnailBatchProgress("");
+        return;
+      }
+      setThumbnailBatchProgress(`Regenerating thumbnails… 0 / ${videosToRegenerate.length} completed`);
+      for (const video of videosToRegenerate) {
+        if (await generateThumbnailFor(video, { quiet: true, refreshAfter: false, batchJob: true })) succeeded++;
+        else failed++;
+        completed++;
+        setThumbnailBatchProgress(`Regenerating thumbnails… ${completed} / ${videosToRegenerate.length} completed`);
+      }
+      await videosHook.refresh();
+      const completion = `Thumbnail regeneration complete — ${succeeded} succeeded, ${failed} failed${failed ? ". Failed videos can be regenerated individually later." : "."}`;
+      setThumbnailBatchProgress(completion);
+      if (failed) toast.error(completion);
+      else toast.success(completion);
+    } catch {
+      setThumbnailBatchProgress("");
+      toast.error("Thumbnail regeneration could not be completed. Try again.");
+    } finally {
+      thumbnailBatchLock.current = false;
+      setThumbnailBatchRunning(false);
+    }
   }
   async function toggleVideo(video: VideoRecord, field: "published" | "featured") { await videosHook.update(video.id, { [field]: !video[field] }); await statsHook.refresh(); }
   async function deleteCategory(category: Category) {
@@ -259,12 +315,39 @@ export default function AdminDashboard() {
   return <main className="dashboard-shell"><aside className="dashboard-sidebar"><a href="/" className="dash-back"><ArrowLeft size={15}/> Public library</a><div className="dash-kicker"><ShieldCheck size={15}/> ADMIN</div><nav>{nav.map(({ name, icon: Icon }) => <button key={name} className={section === name ? "dash-nav active" : "dash-nav"} onClick={() => navigateSection(name)}><Icon size={16}/>{name}</button>)}</nav><button className="dash-logout" onClick={logout}><LogOut size={15}/> Sign out</button></aside>
     <section className="dashboard-content"><header className="dashboard-top"><span>LIBRARY MANAGEMENT</span><button onClick={logout}><LogOut size={14}/> Sign out</button></header>
        {section === "Dashboard" && <><div className="admin-heading"><div><span className="eyebrow">OVERVIEW</span><h1>Dashboard</h1><p>Your library at a glance.</p></div><button className="button-primary" onClick={() => openVideo()}><Plus size={15}/> Add video</button></div><div className="stats-row"><Stat label="Total videos" value={stats?.total_videos}/><Stat label="Published" value={stats?.published_videos}/><Stat label="Categories" value={stats?.total_categories}/><Stat label="Total views" value={stats?.total_views}/></div>{showDashboardStatsDiagnostics && statsHook.diagnostic && <section className="dashboard-diagnostic" role="alert" aria-live="assertive"><h2>Dashboard statistics failed</h2><p>phase: {statsHook.diagnostic.phase}</p><p>message: {statsHook.diagnostic.message}</p><p>code: {statsHook.diagnostic.code ?? "(none)"}</p><p>details: {statsHook.diagnostic.details ?? "(none)"}</p><p>hint: {statsHook.diagnostic.hint ?? "(none)"}</p></section>}<div className="table-heading"><h2>Recently added</h2><button onClick={() => goToVideos()}>Manage videos <ArrowLeft size={13}/></button></div><VideoTable videos={videosHook.videos.slice(0, 6)} categories={categoriesHook.categories} onEdit={openVideo} onDelete={removeVideo} onToggle={toggleVideo} onGenerateThumbnail={generateThumbnailFor} generatingThumbnailIds={generatingThumbnailIds}/></>}
-      {section === "Videos" && <><div className="admin-heading"><div><span className="eyebrow">LIBRARY</span><h1>Videos</h1><p>Search, update, and publish your collection.</p></div><div className="video-header-actions"><button className="secondary-action" onClick={generateMissingThumbnails} disabled={thumbnailBatchRunning}>{thumbnailBatchRunning ? "Generating thumbnails..." : "Generate Missing Thumbnails"}</button><button className="button-primary" onClick={() => openVideo()}><Plus size={15}/> Add video</button></div></div>{thumbnailBatchProgress && <p className="thumbnail-status" role="status">{thumbnailBatchProgress}</p>}<div className="table-tools"><label><Search size={15}/><input value={search} onChange={(event) => changeVideoSearch(event.target.value)} placeholder="Search videos"/></label><select value={categoryFilter} onChange={(event) => changeVideoCategory(event.target.value)}><option value="">All categories</option>{categoriesHook.categories.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}</select><select value={publishedFilter} onChange={(event) => changeVideoStatus(event.target.value)}><option value="all">All statuses</option><option value="published">Published</option><option value="draft">Unpublished</option></select></div><VideoTable videos={videosHook.videos} categories={categoriesHook.categories} onEdit={openVideo} onDelete={removeVideo} onToggle={toggleVideo} onGenerateThumbnail={generateThumbnailFor} generatingThumbnailIds={generatingThumbnailIds}/><VideoPagination page={videoPage} totalPages={adminTotalPages} loading={videosHook.loading} onPageChange={(page) => goToVideos(page, false)} hideNextOnLast/></>}
+       {section === "Videos" && <>
+         <div className="admin-heading">
+           <div><span className="eyebrow">LIBRARY</span><h1>Videos</h1><p>Search, update, and publish your collection.</p></div>
+           <div className="video-header-actions">
+             <button className="secondary-action" onClick={generateMissingThumbnails} disabled={thumbnailBatchRunning}>{thumbnailBatchRunning ? "Generating thumbnails..." : "Generate Missing Thumbnails"}</button>
+             <button className="secondary-action" onClick={() => setRegenerateAllConfirmOpen(true)} disabled={thumbnailBatchRunning}>Regenerate All Thumbnails</button>
+             <button className="button-primary" onClick={() => openVideo()}><Plus size={15}/> Add video</button>
+           </div>
+         </div>
+         {thumbnailBatchProgress && <p className="thumbnail-status" role="status">{thumbnailBatchProgress}</p>}
+         <div className="table-tools">
+           <label><Search size={15}/><input value={search} onChange={(event) => changeVideoSearch(event.target.value)} placeholder="Search videos"/></label>
+           <select value={categoryFilter} onChange={(event) => changeVideoCategory(event.target.value)}><option value="">All categories</option>{categoriesHook.categories.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}</select>
+           <select value={publishedFilter} onChange={(event) => changeVideoStatus(event.target.value)}><option value="all">All statuses</option><option value="published">Published</option><option value="draft">Unpublished</option></select>
+         </div>
+         <VideoTable videos={videosHook.videos} categories={categoriesHook.categories} onEdit={openVideo} onDelete={removeVideo} onToggle={toggleVideo} onGenerateThumbnail={generateThumbnailFor} generatingThumbnailIds={generatingThumbnailIds}/>
+         <VideoPagination page={videoPage} totalPages={adminTotalPages} loading={videosHook.loading} onPageChange={(page) => goToVideos(page, false)} hideNextOnLast/>
+       </>}
       {section === "Add Video" && <><div className="admin-heading add-video-heading"><div><span className="eyebrow">LIBRARY</span><h1>{editingVideo ? "Edit video" : "Add video"}</h1><p>Videos stream directly from their external URLs.</p></div></div><div className="video-editor-card"><form key={editingVideo?.id ?? "new-video"} onSubmit={submitVideo}><label>VIDEO URL<input name="video_url" type="url" required placeholder="https://cdn.example.com/video.mp4" defaultValue={editingVideo?.video_url}/><small>External HTTPS URL only. No video upload.</small></label><label>TITLE<input name="title" required maxLength={180} defaultValue={editingVideo?.title}/></label><div className="category-field"><label htmlFor="video-category">CATEGORY</label><div className="category-control-row"><select id="video-category" name="category_id" required value={selectedCategoryId} onChange={(event) => setSelectedCategoryId(event.target.value)} disabled={categoryOptionsHook.loading || (Boolean(categoryOptionsHook.error) && categoryOptionsHook.categories.length === 0)}><option value="" disabled>{categoryOptionsHook.loading ? "Loading categories..." : categoryOptionsHook.error ? "Categories unavailable" : categoryOptionsHook.categories.length ? "Select category" : "No categories yet — Create category"}</option>{categoryOptionsHook.categories.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}</select><button className="create-category-inline" type="button" onClick={() => openCategory(undefined, true)}><Plus size={14}/> Create category</button></div>{categoryOptionsHook.error && <p className="field-error" role="alert">Could not load categories: {categoryOptionsHook.error} <button type="button" onClick={() => void categoryOptionsHook.refresh()}>Retry</button></p>}{!categoryOptionsHook.error && !categoryOptionsHook.loading && categoryOptionsHook.categories.length === 0 && <p className="field-empty">No categories yet — Create category</p>}</div><label>DESCRIPTION<textarea name="description" rows={3} defaultValue={editingVideo?.description}/></label><label>THUMBNAIL URL<input name="thumbnail_url" type="url" placeholder="https://..." defaultValue={editingVideo?.thumbnail_url ?? ""}/><small>Optional — leave empty to automatically generate a thumbnail from the video.</small></label><label>TAGS<input name="tags" placeholder="documentary, travel" defaultValue={editingVideo?.tags.join(", ")}/></label><label>DURATION<input name="duration" placeholder="12:34" defaultValue={editingVideo?.duration}/></label><div className="check-row"><label><input type="checkbox" name="featured" defaultChecked={editingVideo?.featured}/> Featured</label><label><input type="checkbox" name="published" defaultChecked={editingVideo?.published ?? true}/> Published</label></div><div className="video-form-actions"><button className="button-primary submit-button" type="submit" disabled={videoSubmitInProgress}>{videoSubmitInProgress ? "Saving..." : editingVideo ? "Save changes" : "Add video"}</button><button className="cancel-video-button" type="button" onClick={() => { setEditingVideo(null); setSection("Videos"); }}>Cancel</button></div></form></div></>}
       {section === "Categories" && <><div className="admin-heading"><div><span className="eyebrow">ORGANIZE</span><h1>Categories</h1><p>Create and manage library categories.</p></div><button className="button-primary" onClick={() => openCategory()}><Plus size={15}/> Add category</button></div><div className="category-admin-list">{categoriesHook.categories.map((category) => <div className="category-admin-row" key={category.id}><div><strong>{category.name}</strong><span>{category.description || "No description"}</span></div><span>{category.video_count ?? 0} videos</span><button onClick={() => openCategory(category)}>Edit</button><button aria-label={`Delete ${category.name}`} onClick={() => deleteCategory(category)}><Trash2 size={15}/></button></div>)}{categoriesHook.categories.length === 0 && <p className="admin-empty">No categories yet. Create one to organize videos.</p>}</div></>}
        {section === "Settings" && <><div className="admin-heading"><div><span className="eyebrow">ACCOUNT</span><h1>Settings</h1><p>Manage your admin session.</p></div></div><div className="settings-panel"><ShieldCheck size={18}/><div><strong>Authenticator app MFA</strong><span>A verified TOTP factor and AAL2 session are required for admin access.</span></div><button onClick={logout}>Sign out</button></div><p className="admin-note">Video files are never uploaded. Playback streams directly from each external URL.</p></>}
     </section>
     {categoryDialog && <div className="modal-backdrop category-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setCategoryDialog(false); }}><section className="add-modal category-modal" role="dialog" aria-modal="true" aria-labelledby="category-modal-title"><div className="modal-title"><div><span className="eyebrow">CATEGORY MANAGEMENT</span><h2 id="category-modal-title">{quickCategory ? "Create category" : editingCategory ? "Edit category" : "Create category"}</h2></div><button className="icon-button" type="button" aria-label="Close dialog" onClick={() => setCategoryDialog(false)}><X size={18}/></button></div><form onSubmit={submitCategory}><label>Name<input name="name" required maxLength={80} autoFocus defaultValue={editingCategory?.name}/></label><label>Description (optional)<textarea name="description" rows={3} defaultValue={editingCategory?.description}/></label>{!quickCategory && <label>Image URL<input name="image_url" type="url" defaultValue={editingCategory?.image_url ?? ""}/></label>}{categoryFormError && <p className="field-error" role="alert">{categoryFormError}</p>}<div className="category-modal-actions"><button className="cancel-video-button" type="button" onClick={() => setCategoryDialog(false)}>Cancel</button><button className="button-primary" type="submit">{editingCategory ? "Save changes" : "Create category"}</button></div></form></section></div>}
+    {regenerateAllConfirmOpen && <div className="modal-backdrop thumbnail-regenerate-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setRegenerateAllConfirmOpen(false); }}>
+      <section className="add-modal thumbnail-regenerate-dialog" role="alertdialog" aria-modal="true" aria-labelledby="regenerate-all-title" aria-describedby="regenerate-all-message">
+        <div className="modal-title"><div><span className="eyebrow">THUMBNAIL MANAGEMENT</span><h2 id="regenerate-all-title">Regenerate all thumbnails?</h2></div></div>
+        <p id="regenerate-all-message">This will regenerate thumbnails for all videos that have thumbnails. Existing thumbnails will be replaced with newly generated thumbnails based on each video's actual aspect ratio. This may take some time. Are you sure?</p>
+        <div className="category-modal-actions">
+          <button className="cancel-video-button" type="button" onClick={() => setRegenerateAllConfirmOpen(false)}>Cancel</button>
+          <button className="button-primary" type="button" disabled={thumbnailBatchRunning} onClick={() => { setRegenerateAllConfirmOpen(false); void regenerateAllThumbnails(); }}>Regenerate All</button>
+        </div>
+      </section>
+    </div>}
   </main>;
 }
 

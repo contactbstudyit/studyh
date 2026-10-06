@@ -263,12 +263,29 @@ export function useVideos(options: { categoryId?: string; search?: string; searc
       return null;
     }
   }
+  async function getAllVideosForThumbnailRegeneration(): Promise<Pick<VideoRecord, "id" | "title" | "video_url" | "duration" | "thumbnail_url">[] | null> {
+    try {
+      const client = createClient();
+      const found = new Map<string, Pick<VideoRecord, "id" | "title" | "video_url" | "duration" | "thumbnail_url">>();
+      for (let offset = 0; ; offset += 500) {
+        const { data, error } = await client.from("videos").select("id,title,video_url,duration,thumbnail_url").order("created_at", { ascending: false }).order("id", { ascending: false }).range(offset, offset + 499);
+        if (error) throw error;
+        for (const video of (data ?? []) as Pick<VideoRecord, "id" | "title" | "video_url" | "duration" | "thumbnail_url">[]) found.set(video.id, video);
+        if (!data || data.length < 500) break;
+      }
+      return [...found.values()];
+    } catch (error) {
+      if (process.env.NODE_ENV === "development") console.error("[video-thumbnail] full-library query failed", { code: error && typeof error === "object" && "code" in error ? error.code : null });
+      toast.error("Could not load videos for thumbnail regeneration. Please try again.");
+      return null;
+    }
+  }
   async function recordView(id: string) {
     const counted = await recordPublicVideoView(id);
     if (counted) setVideos((old) => old.map((video) => video.id === id ? { ...video, views: video.views + 1 } : video));
   }
   const loadMore = () => { if (hasMore && !loading) void fetchPage(page + 1, true); };
-  return { videos, loading, hasMore, page, totalCount, refresh, loadMore, create, update, remove, getMissingThumbnails, recordView };
+  return { videos, loading, hasMore, page, totalCount, refresh, loadMore, create, update, remove, getMissingThumbnails, getAllVideosForThumbnailRegeneration, recordView };
 }
 
 export function useRecommendedVideos(currentVideo: Pick<VideoRecord, "id" | "category_id">) {

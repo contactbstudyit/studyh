@@ -1,7 +1,6 @@
 import WatchPage from "@/components/watch-page";
 import { notFound } from "next/navigation";
 import { getPublicVideoById } from "@/lib/category-routes";
-import { createVideoPlaybackUrl } from "@/lib/media-playback-server";
 import { detectSourceType, getSourceHost } from "@/lib/video-playback";
 import { getPublicDisplayViews } from "@/lib/public-view-count-server";
 
@@ -38,7 +37,7 @@ export default async function WatchRoute({ params }: PageProps) {
   return (
     <WatchPage
       video={publicVideo}
-      playbackUrl={createVideoPlaybackUrl(video.id)}
+      playbackUrl=""
       playbackType={detectSourceType(sourceUrl)}
       sourceHost={getSourceHost(sourceUrl)}
       displayViews={getPublicDisplayViews(video)}

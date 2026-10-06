@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { deleteGeneratedThumbnail, isGeneratedR2Thumbnail, saveGeneratedThumbnail } from "@/lib/r2-storage";
+import { deleteGeneratedThumbnail, saveGeneratedThumbnail } from "@/lib/r2-storage";
 import { getAdminMfaStatus, hasAdminTotpAal2 } from "@/lib/admin-mfa";
 
 export const runtime = "nodejs";
@@ -36,8 +36,6 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     if (videoError) throw videoError;
     if (!video) return NextResponse.json({ error: "Video not found or not accessible" }, { status: 404 });
     const previousThumbnail = video.thumbnail_url as string | null;
-    if (previousThumbnail && !isGeneratedR2Thumbnail(id, previousThumbnail)) return NextResponse.json({ error: "A manually supplied thumbnail URL is preserved. Clear it before generating a replacement." }, { status: 409 });
-
     const bytes = Buffer.from(await request.arrayBuffer());
     if (!bytes.length || bytes.length > MAX_IMAGE_BYTES) return NextResponse.json({ error: "Thumbnail image is empty or exceeds the size limit" }, { status: 413 });
     const isJpeg = contentType === "image/jpeg" && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[bytes.length - 2] === 0xff && bytes[bytes.length - 1] === 0xd9;

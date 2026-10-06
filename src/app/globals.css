@@ -467,3 +467,8 @@ nextjs-portal {
   .category-filter-open .sort-popover { top: auto; right: 0; bottom: 8px; width: 100%; max-height: min(65vh,calc(100dvh - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px) - 120px)); }
   .section-wrap.category-results-page { padding-top: 0; padding-bottom: calc(104px + env(safe-area-inset-bottom,0px)); }
 }
+
+.thumbnail-button img,
+.site-shell .public-video-grid .thumbnail-button img { object-fit: contain; }
+.video-card:hover .thumbnail-button img { transform: none; }
+.admin-row img { object-fit: contain; background: #0b0b0b; }

@@ -2,6 +2,18 @@ import { createMediaProxyUrl, detectSourceType, probeVideoSource, supportsNative
 
 const MEDIA_TIMEOUT_MS = 30_000;
 const MAX_THUMBNAIL_BYTES = 300_000;
+const MAX_THUMBNAIL_EDGE = 640;
+
+export function getThumbnailDimensions(sourceWidth: number, sourceHeight: number) {
+  if (!Number.isFinite(sourceWidth) || !Number.isFinite(sourceHeight) || sourceWidth <= 0 || sourceHeight <= 0) {
+    throw new Error("Video dimensions are unavailable");
+  }
+  const scale = Math.min(1, MAX_THUMBNAIL_EDGE / sourceWidth, MAX_THUMBNAIL_EDGE / sourceHeight);
+  const width = Math.max(1, Math.round(sourceWidth * scale));
+  const height = Math.max(1, Math.round(sourceHeight * scale));
+  const orientation = sourceWidth === sourceHeight ? "square" : sourceWidth > sourceHeight ? "landscape" : "portrait";
+  return { width, height, aspectRatio: sourceWidth / sourceHeight, orientation };
+}
 
 export function isGeneratedThumbnailUrl(videoId: string, thumbnailUrl: string | null | undefined) {
   if (!thumbnailUrl) return false;
@@ -77,15 +89,13 @@ function frameLooksUseful(canvas: HTMLCanvasElement, context: CanvasRenderingCon
   return average >= 9 || spread >= 16;
 }
 
-function drawFrame(video: HTMLVideoElement) {
+function drawFrame(video: HTMLVideoElement, thumbnailWidth: number, thumbnailHeight: number) {
   const canvas = document.createElement("canvas");
-  canvas.width = 640; canvas.height = 360;
+  canvas.width = thumbnailWidth;
+  canvas.height = thumbnailHeight;
   const context = canvas.getContext("2d", { willReadFrequently: true });
   if (!context || !video.videoWidth || !video.videoHeight) throw new Error("No decoded video frame is available");
-  const scale = Math.max(canvas.width / video.videoWidth, canvas.height / video.videoHeight);
-  const width = video.videoWidth * scale;
-  const height = video.videoHeight * scale;
-  context.drawImage(video, (canvas.width - width) / 2, (canvas.height - height) / 2, width, height);
+  context.drawImage(video, 0, 0, canvas.width, canvas.height);
   if (!frameLooksUseful(canvas, context)) return null;
   return canvas;
 }
@@ -168,6 +178,17 @@ export async function generateVideoThumbnail(videoUrl: string, durationHint = ""
 
     try { await video.play(); } catch { /* Seeking can still decode a frame if autoplay is blocked. */ }
     if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) await waitForMediaEvent(video, ["loadeddata", "canplay"], MEDIA_TIMEOUT_MS, signal);
+    const dimensions = getThumbnailDimensions(video.videoWidth, video.videoHeight);
+    if (process.env.NODE_ENV === "development") {
+      console.info("[video-thumbnail] detected source dimensions", {
+        sourceWidth: video.videoWidth,
+        sourceHeight: video.videoHeight,
+        aspectRatio: Number(dimensions.aspectRatio.toFixed(4)),
+        orientation: dimensions.orientation,
+        thumbnailWidth: dimensions.width,
+        thumbnailHeight: dimensions.height,
+      });
+    }
     const candidates = getSeekTargets(video, durationHint);
     let captureError: unknown = null;
     for (const target of candidates) {
@@ -178,7 +199,7 @@ export async function generateVideoThumbnail(videoUrl: string, durationHint = ""
           await seeked;
         }
         await waitForDecodedFrame(video, signal);
-        const canvas = drawFrame(video);
+        const canvas = drawFrame(video, dimensions.width, dimensions.height);
         if (!canvas) continue;
         return await makeSmallImage(canvas);
       } catch (error) { captureError = error; }

@@ -175,8 +175,25 @@ body { background: #000; color: #fff; font-family: var(--font-geist-sans), syste
 .field-empty { margin: 0; color: #888; font-size: 10px; letter-spacing: 0; }
 .video-form-actions { display: flex; align-items: center; gap: 9px; padding-top: 3px; }
 .thumbnail-status { margin: -9px 0 0; color: #b8b8b8; font-size: 10px; }
+.video-check-progress { margin: -9px 0 0; color: #c4c0b7; font-size: 10px; }
+.video-check-action { color: #d5d2ca !important; }
 .thumbnail-status.success { color: #b9cbb8; }
 .thumbnail-status.warning { color: #d2b8a3; }
+.video-check-confirm-dialog .modal-title { margin-bottom: 12px; }
+.video-check-confirm-dialog .modal-title h2 { margin: 7px 0 0; font-size: 22px; font-weight: 600; }
+.video-check-confirm-dialog > p { margin: 0 0 20px; color: #a5a39d; font-size: 12px; line-height: 1.65; }
+.video-check-action:disabled { opacity: .55; cursor: wait; }
+.video-check-results { margin-top: 26px; border: 1px solid var(--line); background: #10100f; padding: 17px; }
+.video-check-results-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 9px; }
+.video-check-results-heading h2 { margin: 0; font: 400 20px Georgia,serif; }
+.video-check-summary,.video-check-failure { margin: 0 0 15px; color: #aaa79f; font-size: 11px; line-height: 1.7; }
+.video-check-failure { color: #d2b8a3; }
+.video-check-table-wrap { max-height: 420px; overflow: auto; }
+.video-check-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 10px; }
+.video-check-table th { position: sticky; top: 0; background: #10100f; color: #8f8c84; font-size: 8px; font-weight: 500; letter-spacing: 1px; text-transform: uppercase; }
+.video-check-table th,.video-check-table td { padding: 9px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.video-check-table td { color: #b9b6ae; line-height: 1.5; }
+.video-check-table tr:last-child td { border-bottom: 0; }
 .thumbnail-regenerate-dialog .modal-title { margin-bottom: 12px; }
 .thumbnail-regenerate-dialog .modal-title h2 { margin: 7px 0 0; font-size: 22px; font-weight: 600; }
 .thumbnail-regenerate-dialog > p { margin: 0 0 20px; color: #a5a39d; font-size: 12px; line-height: 1.65; }
@@ -186,6 +203,7 @@ body { background: #000; color: #fff; font-family: var(--font-geist-sans), syste
 .secondary-action:hover:not(:disabled) { border-color: #5a5a5a; background: #171717; }
 .secondary-action:disabled { opacity: .6; cursor: wait; }
 .video-table-row .row-actions button:disabled { opacity: .55; cursor: wait; }
+@media (max-width: 900px) { .video-table-row.has-video-check-action .row-actions button.thumbnail-row-action,.video-table-row.has-video-check-action .row-actions button.video-check-action { display: inline-flex; }.video-table-row.has-video-check-action .row-actions button:nth-child(4) { display: none; } }
 .manual-thumbnail-label { align-self: center; color: #777; font-size: 8px; padding: 4px; }
 .skeleton-card { animation: rise .35s both; }
 .skeleton-thumbnail,.skeleton-title span { position: relative; display: block; overflow: hidden; background: #111; }

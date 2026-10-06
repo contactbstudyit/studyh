@@ -12,6 +12,9 @@ import VideoPagination from "@/components/video-pagination";
 
 const ADMIN_VIDEO_PAGE_SIZE = 15;
 const showDashboardStatsDiagnostics = process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_VERCEL_ENV === "preview";
+type VideoCheckStatus = "working" | "recovered" | "temporary" | "broken" | "unpublished" | "skipped";
+type VideoCheckResult = { videoId: string; title: string; status: VideoCheckStatus; reason: string; action: string };
+type VideoCheckSummary = { checked: number; working: number; recovered: number; temporary: number; unpublished: number; skipped: number };
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -33,6 +36,14 @@ export default function AdminDashboard() {
   const [regenerateAllConfirmOpen, setRegenerateAllConfirmOpen] = useState(false);
   const thumbnailBatchLock = useRef(false);
   const thumbnailGenerationLocks = useRef(new Set<string>());
+  const [checkAllConfirmOpen, setCheckAllConfirmOpen] = useState(false);
+  const [videoCheckRunning, setVideoCheckRunning] = useState(false);
+  const [videoCheckProgress, setVideoCheckProgress] = useState("");
+  const [videoCheckFailure, setVideoCheckFailure] = useState("");
+  const [videoCheckResults, setVideoCheckResults] = useState<VideoCheckResult[]>([]);
+  const [videoCheckSummary, setVideoCheckSummary] = useState<VideoCheckSummary | null>(null);
+  const [checkingVideoIds, setCheckingVideoIds] = useState<Set<string>>(() => new Set());
+  const videoCheckLock = useRef(false);
   const [editingVideo, setEditingVideo] = useState<VideoRecord | null>(null);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const statsHook = useLibraryStats();
@@ -146,6 +157,13 @@ export default function AdminDashboard() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [regenerateAllConfirmOpen]);
 
+  useEffect(() => {
+    if (!checkAllConfirmOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") setCheckAllConfirmOpen(false); };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [checkAllConfirmOpen]);
+
   async function logout() { await createClient().auth.signOut(); router.replace("/admin/login"); router.refresh(); }
   function openVideo(video?: VideoRecord) {
     setEditingVideo(video ?? null);
@@ -225,7 +243,7 @@ export default function AdminDashboard() {
     } catch (error) { toast.error(error instanceof Error ? error.message : "Could not delete video and thumbnail."); }
   }
   async function generateThumbnailFor(video: Pick<VideoRecord, "id" | "title" | "video_url" | "duration" | "thumbnail_url">, options: { quiet?: boolean; refreshAfter?: boolean; batchJob?: boolean } = {}) {
-    if (thumbnailBatchLock.current && !options.batchJob) return false;
+    if ((thumbnailBatchLock.current || videoCheckLock.current) && !options.batchJob) return false;
     if (thumbnailGenerationLocks.current.has(video.id)) return false;
     thumbnailGenerationLocks.current.add(video.id);
     setGeneratingThumbnailIds((current) => new Set(current).add(video.id));
@@ -247,7 +265,7 @@ export default function AdminDashboard() {
     }
   }
   async function generateMissingThumbnails() {
-    if (thumbnailBatchLock.current) return;
+    if (thumbnailBatchLock.current || videoCheckLock.current) return;
     thumbnailBatchLock.current = true;
     setThumbnailBatchRunning(true);
     try {
@@ -269,7 +287,7 @@ export default function AdminDashboard() {
     }
   }
   async function regenerateAllThumbnails() {
-    if (thumbnailBatchLock.current) return;
+    if (thumbnailBatchLock.current || videoCheckLock.current) return;
     thumbnailBatchLock.current = true;
     setThumbnailBatchRunning(true);
     let completed = 0;
@@ -305,6 +323,172 @@ export default function AdminDashboard() {
       setThumbnailBatchRunning(false);
     }
   }
+  async function checkSingleVideo(video: VideoRecord) {
+    if (videoCheckLock.current || thumbnailBatchLock.current || checkingVideoIds.has(video.id)) return;
+    videoCheckLock.current = true;
+    setCheckingVideoIds((current) => new Set(current).add(video.id));
+    try {
+      const response = await fetch("/api/admin/videos/check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ videoId: video.id }),
+      });
+      const result = await response.json() as { videoId?: string; title?: string; status?: VideoCheckStatus; reason?: string; error?: string };
+      if (!response.ok || !result.status) throw new Error(result.error || "Video check failed");
+      if (result.status === "working") { toast.success(`${video.title}: video source is working.`); return; }
+      if (result.status === "recovered") { toast.warning(`${video.title}: the source recovered on retry and remains published.`); return; }
+      if (result.status === "temporary") { toast.warning(`${video.title}: temporary source failure (${result.reason}). It remains published.`); return; }
+      if (result.status === "skipped") { toast.info(`${video.title}: no longer published; no changes made.`); return; }
+      if (result.status !== "broken") throw new Error("Unexpected video check result");
+
+      const confirmed = window.confirm(`${video.title} is confirmed broken (${result.reason}). Unpublish it? The video record, thumbnail, and metadata will be preserved.`);
+      if (!confirmed) { toast.info(`${video.title} remains published.`); return; }
+      const unpublishResponse = await fetch("/api/admin/videos/check", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ videoIds: [video.id] }),
+      });
+      const unpublishResult = await unpublishResponse.json() as { results?: Array<{ videoId: string; status: VideoCheckStatus; reason: string }>; error?: string };
+      if (!unpublishResponse.ok) throw new Error(unpublishResult.error || "Could not confirm the unpublish action");
+      const finalResult = unpublishResult.results?.find((item) => item.videoId === video.id);
+      if (finalResult?.status === "unpublished") {
+        toast.success(`${video.title} was unpublished. Its video record, thumbnail, and metadata were preserved.`);
+        await videosHook.refresh();
+        await statsHook.refresh();
+      } else if (finalResult?.status === "working" || finalResult?.status === "recovered") {
+        toast.success(`${video.title} is now working and remains published.`);
+      } else {
+        toast.warning(`${video.title} was not unpublished because the retry was inconclusive. ${finalResult?.reason ?? "It remains published."}`);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Video check failed. No publication changes were made.");
+    } finally {
+      videoCheckLock.current = false;
+      setCheckingVideoIds((current) => { const next = new Set(current); next.delete(video.id); return next; });
+    }
+  }
+
+  async function checkAllVideos() {
+    if (videoCheckLock.current || thumbnailBatchLock.current) return;
+    videoCheckLock.current = true;
+    setVideoCheckRunning(true);
+    setVideoCheckProgress("Loading published videos…");
+    setVideoCheckFailure("");
+    setVideoCheckResults([]);
+    setVideoCheckSummary(null);
+    let unpublishRequestStarted = false;
+    try {
+      const listResponse = await fetch("/api/admin/videos/check", { cache: "no-store" });
+      const listPayload = await listResponse.json() as { videos?: Array<{ id: string; title: string }>; error?: string };
+      if (!listResponse.ok || !listPayload.videos) throw new Error(listPayload.error || "Could not load published videos");
+      const videos = listPayload.videos;
+      if (videos.length === 0) {
+        const emptySummary = { checked: 0, working: 0, recovered: 0, temporary: 0, unpublished: 0, skipped: 0 };
+        setVideoCheckSummary(emptySummary);
+        setVideoCheckProgress("");
+        toast.success("Video check complete. No published videos to check.");
+        return;
+      }
+
+      const initialResults: Array<VideoCheckResult | undefined> = new Array(videos.length);
+      let nextIndex = 0;
+      let completed = 0;
+      let scanFailed = false;
+      setVideoCheckProgress(`Checking videos… 0 / ${videos.length}`);
+      const worker = async () => {
+        while (!scanFailed) {
+          const index = nextIndex++;
+          if (index >= videos.length) return;
+          try {
+            const response = await fetch("/api/admin/videos/check", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ videoId: videos[index].id }),
+            });
+            const result = await response.json() as { videoId?: string; title?: string; status?: VideoCheckStatus; reason?: string; error?: string };
+            if (!response.ok || !result.status) throw new Error(result.error || "A video check could not be completed safely");
+            if ((result.status as string) === "internal") throw new Error("The secure checker encountered an internal error");
+            initialResults[index] = {
+              videoId: videos[index].id,
+              title: videos[index].title,
+              status: result.status,
+              reason: result.reason ?? "No additional details",
+              action: result.status === "broken" ? "Awaiting final confirmation" : result.status === "skipped" ? "No changes made" : "Remains published",
+            };
+            completed++;
+            setVideoCheckResults(initialResults.filter((item): item is VideoCheckResult => Boolean(item)));
+            setVideoCheckProgress(`Checking videos… ${completed} / ${videos.length}`);
+          } catch {
+            scanFailed = true;
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(3, videos.length) }, () => worker()));
+      if (scanFailed) {
+        const partialResults = initialResults.filter((item): item is VideoCheckResult => Boolean(item)).map((item) => item.status === "broken" ? { ...item, action: "Not changed; scan stopped" } : item);
+        setVideoCheckResults(partialResults);
+        setVideoCheckFailure("The scan stopped because the checker encountered an unexpected error. No videos were unpublished.");
+        setVideoCheckProgress("");
+        toast.error("Video scan stopped. No videos were unpublished.");
+        return;
+      }
+
+      let finalResults = initialResults.filter((item): item is VideoCheckResult => Boolean(item));
+      const brokenIds = finalResults.filter((item) => item.status === "broken").map((item) => item.videoId);
+      if (brokenIds.length > 0) {
+        setVideoCheckProgress(`Confirming ${brokenIds.length} broken source${brokenIds.length === 1 ? "" : "s"}…`);
+        unpublishRequestStarted = true;
+        const response = await fetch("/api/admin/videos/check", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ videoIds: brokenIds }),
+        });
+        const payload = await response.json() as { results?: Array<{ videoId: string; title: string; status: VideoCheckStatus; reason: string }>; error?: string };
+        if (!response.ok || !payload.results) throw new Error(payload.error || "Could not confirm broken video results");
+        const finalById = new Map(payload.results.map((item) => [item.videoId, item]));
+        finalResults = finalResults.map((item) => {
+          const final = finalById.get(item.videoId);
+          if (!final) return item;
+          return {
+            ...item,
+            title: final.title || item.title,
+            status: final.status,
+            reason: final.reason,
+            action: final.status === "unpublished" ? "Unpublished" : final.status === "skipped" ? "No changes made" : "Remains published",
+          };
+        });
+        if (payload.results.some((item) => item.status === "unpublished")) {
+          await videosHook.refresh();
+          await statsHook.refresh();
+        }
+      }
+
+      setVideoCheckResults(finalResults);
+      const summary: VideoCheckSummary = {
+        checked: finalResults.length,
+        working: finalResults.filter((item) => item.status === "working").length,
+        recovered: finalResults.filter((item) => item.status === "recovered").length,
+        temporary: finalResults.filter((item) => item.status === "temporary").length,
+        unpublished: finalResults.filter((item) => item.status === "unpublished").length,
+        skipped: finalResults.filter((item) => item.status === "skipped").length,
+      };
+      setVideoCheckSummary(summary);
+      setVideoCheckProgress("");
+      const message = `Video check complete — ${summary.checked} checked, ${summary.working} working, ${summary.recovered + summary.temporary} temporarily failed/recovered, ${summary.unpublished} confirmed broken and unpublished`;
+      if (summary.unpublished > 0 || summary.temporary > 0) toast.warning(message);
+      else toast.success(message);
+    } catch (error) {
+      const message = unpublishRequestStarted
+        ? "The final unpublish step could not be confirmed. Refresh the video list before retrying."
+        : "The scan stopped because of an unexpected error. No videos were unpublished.";
+      setVideoCheckFailure(message);
+      setVideoCheckProgress("");
+      toast.error(error instanceof Error ? `${message} ${error.message}` : message);
+    } finally {
+      videoCheckLock.current = false;
+      setVideoCheckRunning(false);
+    }
+  }
   async function toggleVideo(video: VideoRecord, field: "published" | "featured") { await videosHook.update(video.id, { [field]: !video[field] }); await statsHook.refresh(); }
   async function deleteCategory(category: Category) {
     if (!window.confirm(`Delete “${category.name}”? Categories with videos cannot be deleted.`)) return;
@@ -312,26 +496,35 @@ export default function AdminDashboard() {
   }
 
   const nav = [{ name: "Dashboard", icon: LayoutDashboard }, { name: "Videos", icon: Film }, { name: "Add Video", icon: Plus }, { name: "Categories", icon: FolderOpen }, { name: "Settings", icon: Settings }];
+  const mediaMaintenanceRunning = thumbnailBatchRunning || videoCheckRunning || videoCheckLock.current;
   return <main className="dashboard-shell"><aside className="dashboard-sidebar"><a href="/" className="dash-back"><ArrowLeft size={15}/> Public library</a><div className="dash-kicker"><ShieldCheck size={15}/> ADMIN</div><nav>{nav.map(({ name, icon: Icon }) => <button key={name} className={section === name ? "dash-nav active" : "dash-nav"} onClick={() => navigateSection(name)}><Icon size={16}/>{name}</button>)}</nav><button className="dash-logout" onClick={logout}><LogOut size={15}/> Sign out</button></aside>
     <section className="dashboard-content"><header className="dashboard-top"><span>LIBRARY MANAGEMENT</span><button onClick={logout}><LogOut size={14}/> Sign out</button></header>
        {section === "Dashboard" && <><div className="admin-heading"><div><span className="eyebrow">OVERVIEW</span><h1>Dashboard</h1><p>Your library at a glance.</p></div><button className="button-primary" onClick={() => openVideo()}><Plus size={15}/> Add video</button></div><div className="stats-row"><Stat label="Total videos" value={stats?.total_videos}/><Stat label="Published" value={stats?.published_videos}/><Stat label="Categories" value={stats?.total_categories}/><Stat label="Total views" value={stats?.total_views}/></div>{showDashboardStatsDiagnostics && statsHook.diagnostic && <section className="dashboard-diagnostic" role="alert" aria-live="assertive"><h2>Dashboard statistics failed</h2><p>phase: {statsHook.diagnostic.phase}</p><p>message: {statsHook.diagnostic.message}</p><p>code: {statsHook.diagnostic.code ?? "(none)"}</p><p>details: {statsHook.diagnostic.details ?? "(none)"}</p><p>hint: {statsHook.diagnostic.hint ?? "(none)"}</p></section>}<div className="table-heading"><h2>Recently added</h2><button onClick={() => goToVideos()}>Manage videos <ArrowLeft size={13}/></button></div><VideoTable videos={videosHook.videos.slice(0, 6)} categories={categoriesHook.categories} onEdit={openVideo} onDelete={removeVideo} onToggle={toggleVideo} onGenerateThumbnail={generateThumbnailFor} generatingThumbnailIds={generatingThumbnailIds}/></>}
        {section === "Videos" && <>
          <div className="admin-heading">
-           <div><span className="eyebrow">LIBRARY</span><h1>Videos</h1><p>Search, update, and publish your collection.</p></div>
-           <div className="video-header-actions">
-             <button className="secondary-action" onClick={generateMissingThumbnails} disabled={thumbnailBatchRunning}>{thumbnailBatchRunning ? "Generating thumbnails..." : "Generate Missing Thumbnails"}</button>
-             <button className="secondary-action" onClick={() => setRegenerateAllConfirmOpen(true)} disabled={thumbnailBatchRunning}>Regenerate All Thumbnails</button>
-             <button className="button-primary" onClick={() => openVideo()}><Plus size={15}/> Add video</button>
-           </div>
-         </div>
-         {thumbnailBatchProgress && <p className="thumbnail-status" role="status">{thumbnailBatchProgress}</p>}
+            <div><span className="eyebrow">LIBRARY</span><h1>Videos</h1><p>Search, update, and publish your collection.</p></div>
+            <div className="video-header-actions">
+              <button className="secondary-action" onClick={generateMissingThumbnails} disabled={mediaMaintenanceRunning}>{thumbnailBatchRunning ? "Generating thumbnails..." : "Generate Missing Thumbnails"}</button>
+              <button className="secondary-action" onClick={() => setRegenerateAllConfirmOpen(true)} disabled={mediaMaintenanceRunning}>Regenerate All Thumbnails</button>
+              <button className="secondary-action" onClick={() => setCheckAllConfirmOpen(true)} disabled={mediaMaintenanceRunning}>{videoCheckRunning ? "Checking videos..." : "Check All Videos"}</button>
+              <button className="button-primary" onClick={() => openVideo()}><Plus size={15}/> Add video</button>
+            </div>
+          </div>
+          {thumbnailBatchProgress && <p className="thumbnail-status" role="status">{thumbnailBatchProgress}</p>}
+          {videoCheckProgress && <p className="video-check-progress" role="status">{videoCheckProgress}</p>}
          <div className="table-tools">
            <label><Search size={15}/><input value={search} onChange={(event) => changeVideoSearch(event.target.value)} placeholder="Search videos"/></label>
            <select value={categoryFilter} onChange={(event) => changeVideoCategory(event.target.value)}><option value="">All categories</option>{categoriesHook.categories.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}</select>
            <select value={publishedFilter} onChange={(event) => changeVideoStatus(event.target.value)}><option value="all">All statuses</option><option value="published">Published</option><option value="draft">Unpublished</option></select>
          </div>
-         <VideoTable videos={videosHook.videos} categories={categoriesHook.categories} onEdit={openVideo} onDelete={removeVideo} onToggle={toggleVideo} onGenerateThumbnail={generateThumbnailFor} generatingThumbnailIds={generatingThumbnailIds}/>
+         <VideoTable videos={videosHook.videos} categories={categoriesHook.categories} onEdit={openVideo} onDelete={removeVideo} onToggle={toggleVideo} onGenerateThumbnail={generateThumbnailFor} generatingThumbnailIds={generatingThumbnailIds} onCheckVideo={checkSingleVideo} checkingVideoIds={checkingVideoIds} checkDisabled={mediaMaintenanceRunning}/>
          <VideoPagination page={videoPage} totalPages={adminTotalPages} loading={videosHook.loading} onPageChange={(page) => goToVideos(page, false)} hideNextOnLast/>
+         {(videoCheckRunning || videoCheckSummary || videoCheckFailure) && <section className="video-check-results" aria-live="polite">
+           <div className="video-check-results-heading"><h2>{videoCheckRunning ? "Video check in progress" : videoCheckFailure ? "Video check stopped" : "Video check complete"}</h2></div>
+           {videoCheckSummary && <p className="video-check-summary">{videoCheckSummary.checked} checked<br/>{videoCheckSummary.working} working<br/>{videoCheckSummary.recovered + videoCheckSummary.temporary} temporarily failed/recovered<br/>{videoCheckSummary.unpublished} confirmed broken and unpublished{videoCheckSummary.skipped > 0 && <><br/>{videoCheckSummary.skipped} skipped</>}</p>}
+           {videoCheckFailure && <p className="video-check-failure" role="alert">{videoCheckFailure}</p>}
+           {videoCheckResults.length > 0 && <div className="video-check-table-wrap"><table className="video-check-table"><thead><tr><th>Video</th><th>Status</th><th>Reason</th><th>Action</th></tr></thead><tbody>{videoCheckResults.map((result) => <tr key={result.videoId}><td>{result.title}</td><td>{videoCheckStatusLabel(result.status, result.action)}</td><td>{result.reason}</td><td>{result.action}</td></tr>)}</tbody></table></div>}
+         </section>}
        </>}
       {section === "Add Video" && <><div className="admin-heading add-video-heading"><div><span className="eyebrow">LIBRARY</span><h1>{editingVideo ? "Edit video" : "Add video"}</h1><p>Videos stream directly from their external URLs.</p></div></div><div className="video-editor-card"><form key={editingVideo?.id ?? "new-video"} onSubmit={submitVideo}><label>VIDEO URL<input name="video_url" type="url" required placeholder="https://cdn.example.com/video.mp4" defaultValue={editingVideo?.video_url}/><small>External HTTPS URL only. No video upload.</small></label><label>TITLE<input name="title" required maxLength={180} defaultValue={editingVideo?.title}/></label><div className="category-field"><label htmlFor="video-category">CATEGORY</label><div className="category-control-row"><select id="video-category" name="category_id" required value={selectedCategoryId} onChange={(event) => setSelectedCategoryId(event.target.value)} disabled={categoryOptionsHook.loading || (Boolean(categoryOptionsHook.error) && categoryOptionsHook.categories.length === 0)}><option value="" disabled>{categoryOptionsHook.loading ? "Loading categories..." : categoryOptionsHook.error ? "Categories unavailable" : categoryOptionsHook.categories.length ? "Select category" : "No categories yet — Create category"}</option>{categoryOptionsHook.categories.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}</select><button className="create-category-inline" type="button" onClick={() => openCategory(undefined, true)}><Plus size={14}/> Create category</button></div>{categoryOptionsHook.error && <p className="field-error" role="alert">Could not load categories: {categoryOptionsHook.error} <button type="button" onClick={() => void categoryOptionsHook.refresh()}>Retry</button></p>}{!categoryOptionsHook.error && !categoryOptionsHook.loading && categoryOptionsHook.categories.length === 0 && <p className="field-empty">No categories yet — Create category</p>}</div><label>DESCRIPTION<textarea name="description" rows={3} defaultValue={editingVideo?.description}/></label><label>THUMBNAIL URL<input name="thumbnail_url" type="url" placeholder="https://..." defaultValue={editingVideo?.thumbnail_url ?? ""}/><small>Optional — leave empty to automatically generate a thumbnail from the video.</small></label><label>TAGS<input name="tags" placeholder="documentary, travel" defaultValue={editingVideo?.tags.join(", ")}/></label><label>DURATION<input name="duration" placeholder="12:34" defaultValue={editingVideo?.duration}/></label><div className="check-row"><label><input type="checkbox" name="featured" defaultChecked={editingVideo?.featured}/> Featured</label><label><input type="checkbox" name="published" defaultChecked={editingVideo?.published ?? true}/> Published</label></div><div className="video-form-actions"><button className="button-primary submit-button" type="submit" disabled={videoSubmitInProgress}>{videoSubmitInProgress ? "Saving..." : editingVideo ? "Save changes" : "Add video"}</button><button className="cancel-video-button" type="button" onClick={() => { setEditingVideo(null); setSection("Videos"); }}>Cancel</button></div></form></div></>}
       {section === "Categories" && <><div className="admin-heading"><div><span className="eyebrow">ORGANIZE</span><h1>Categories</h1><p>Create and manage library categories.</p></div><button className="button-primary" onClick={() => openCategory()}><Plus size={15}/> Add category</button></div><div className="category-admin-list">{categoriesHook.categories.map((category) => <div className="category-admin-row" key={category.id}><div><strong>{category.name}</strong><span>{category.description || "No description"}</span></div><span>{category.video_count ?? 0} videos</span><button onClick={() => openCategory(category)}>Edit</button><button aria-label={`Delete ${category.name}`} onClick={() => deleteCategory(category)}><Trash2 size={15}/></button></div>)}{categoriesHook.categories.length === 0 && <p className="admin-empty">No categories yet. Create one to organize videos.</p>}</div></>}
@@ -348,10 +541,58 @@ export default function AdminDashboard() {
         </div>
       </section>
     </div>}
+    {checkAllConfirmOpen && <div className="modal-backdrop video-check-confirm-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setCheckAllConfirmOpen(false); }}>
+      <section className="add-modal video-check-confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="check-all-videos-title" aria-describedby="check-all-videos-message">
+        <div className="modal-title"><div><span className="eyebrow">SOURCE HEALTH CHECK</span><h2 id="check-all-videos-title">Check all videos?</h2></div></div>
+        <p id="check-all-videos-message">This will test all published videos to make sure their external media sources are still accessible. Videos confirmed as broken will be automatically unpublished. This may take some time.</p>
+        <div className="category-modal-actions">
+          <button className="cancel-video-button" type="button" onClick={() => setCheckAllConfirmOpen(false)}>Cancel</button>
+          <button className="button-primary" type="button" disabled={mediaMaintenanceRunning} onClick={() => { setCheckAllConfirmOpen(false); void checkAllVideos(); }}>Check All Videos</button>
+        </div>
+      </section>
+    </div>}
   </main>;
 }
 
 function Stat({ label, value }: { label: string; value?: number }) { return <div className="stat-card"><span>{label}</span><strong>{value?.toLocaleString() ?? "—"}</strong><small>From your library</small></div>; }
-function VideoTable({ videos, categories, onEdit, onDelete, onToggle, onGenerateThumbnail, generatingThumbnailIds }: { videos: VideoRecord[]; categories: Category[]; onEdit: (video: VideoRecord) => void; onDelete: (id: string) => void; onToggle: (video: VideoRecord, field: "published" | "featured") => void; onGenerateThumbnail: (video: VideoRecord) => Promise<boolean>; generatingThumbnailIds: Set<string> }) {
-  return <div className="admin-table video-management-table"><div className="video-table-head"><span>VIDEO</span><span>CATEGORY</span><span>STATUS</span><span>VIEWS</span><span>ADDED</span><span>ACTIONS</span></div>{videos.map((video) => <div className="admin-row video-table-row" key={video.id}><img src={video.thumbnail_url || "https://images.unsplash.com/photo-1485846234645-a62644f84728?auto=format&fit=crop&w=180&q=75"} alt=""/><div className="admin-title"><strong>{video.title}</strong><span>{video.featured ? "Featured · " : ""}{video.duration || "Video"}</span></div><span>{video.categories?.name ?? categories.find((item) => item.id === video.category_id)?.name ?? "—"}</span><span>{video.published ? "Published" : "Draft"}</span><span>{video.views.toLocaleString()}</span><span>{new Date(video.created_at).toLocaleDateString()}</span><div className="row-actions"><button onClick={() => onEdit(video)}>Edit</button><button onClick={() => void onGenerateThumbnail(video)} disabled={generatingThumbnailIds.has(video.id)} title={video.thumbnail_url ? "Explicitly replace this thumbnail with a frame from the source video" : undefined}>{generatingThumbnailIds.has(video.id) ? "Generating…" : video.thumbnail_url ? "Regenerate thumbnail" : "Generate thumbnail"}</button><button onClick={() => onToggle(video, "published")}>{video.published ? "Unpublish" : "Publish"}</button><button onClick={() => onToggle(video, "featured")}>{video.featured ? "Unfeature" : "Feature"}</button><button onClick={() => { if (window.confirm(`Delete “${video.title}”? This cannot be undone.`)) void onDelete(video.id); }} aria-label={`Delete ${video.title}`}><Trash2 size={14}/></button></div></div>)}{videos.length === 0 && <p className="admin-empty">No videos found.</p>}</div>;
+function VideoTable({ videos, categories, onEdit, onDelete, onToggle, onGenerateThumbnail, generatingThumbnailIds, onCheckVideo, checkingVideoIds, checkDisabled }: {
+  videos: VideoRecord[];
+  categories: Category[];
+  onEdit: (video: VideoRecord) => void;
+  onDelete: (id: string) => void;
+  onToggle: (video: VideoRecord, field: "published" | "featured") => void;
+  onGenerateThumbnail: (video: VideoRecord) => Promise<boolean>;
+  generatingThumbnailIds: Set<string>;
+  onCheckVideo?: (video: VideoRecord) => void;
+  checkingVideoIds?: Set<string>;
+  checkDisabled?: boolean;
+}) {
+  return <div className="admin-table video-management-table">
+    <div className="video-table-head"><span>VIDEO</span><span>CATEGORY</span><span>STATUS</span><span>VIEWS</span><span>ADDED</span><span>ACTIONS</span></div>
+    {videos.map((video) => <div className={`admin-row video-table-row${onCheckVideo ? " has-video-check-action" : ""}`} key={video.id}>
+      <img src={video.thumbnail_url || "https://images.unsplash.com/photo-1485846234645-a62644f84728?auto=format&fit=crop&w=180&q=75"} alt=""/>
+      <div className="admin-title"><strong>{video.title}</strong><span>{video.featured ? "Featured · " : ""}{video.duration || "Video"}</span></div>
+      <span>{video.categories?.name ?? categories.find((item) => item.id === video.category_id)?.name ?? "—"}</span>
+      <span>{video.published ? "Published" : "Draft"}</span>
+      <span>{video.views.toLocaleString()}</span>
+      <span>{new Date(video.created_at).toLocaleDateString()}</span>
+      <div className="row-actions">
+        <button onClick={() => onEdit(video)}>Edit</button>
+        {onCheckVideo && <button className="video-check-action" onClick={() => onCheckVideo(video)} disabled={!video.published || checkDisabled || checkingVideoIds?.has(video.id)}>{checkingVideoIds?.has(video.id) ? "Checking…" : "Check"}</button>}
+        <button className="thumbnail-row-action" onClick={() => void onGenerateThumbnail(video)} disabled={generatingThumbnailIds.has(video.id)} title={video.thumbnail_url ? "Explicitly replace this thumbnail with a frame from the source video" : undefined}>{generatingThumbnailIds.has(video.id) ? "Generating…" : video.thumbnail_url ? "Regenerate thumbnail" : "Generate thumbnail"}</button>
+        <button onClick={() => onToggle(video, "published")}>{video.published ? "Unpublish" : "Publish"}</button>
+        <button onClick={() => onToggle(video, "featured")}>{video.featured ? "Unfeature" : "Feature"}</button>
+        <button onClick={() => { if (window.confirm(`Delete “${video.title}”? This cannot be undone.`)) void onDelete(video.id); }} aria-label={`Delete ${video.title}`}><Trash2 size={14}/></button>
+      </div>
+    </div>)}
+    {videos.length === 0 && <p className="admin-empty">No videos found.</p>}
+  </div>;
+}
+
+function videoCheckStatusLabel(status: VideoCheckStatus, action: string) {
+  if (status === "working") return "✓ Working";
+  if (status === "recovered" || status === "temporary") return "⚠️ Temporary failure/recovered";
+  if (status === "unpublished") return "✕ Broken — unpublished";
+  if (status === "broken") return action === "Not changed; scan stopped" ? "✕ Broken — not unpublished" : "✕ Broken — awaiting final confirmation";
+  return "— Skipped";
 }

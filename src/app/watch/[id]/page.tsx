@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { getPublicVideoById } from "@/lib/category-routes";
 import { detectSourceType, getSourceHost } from "@/lib/video-playback";
 import { getPublicDisplayViews } from "@/lib/public-view-count-server";
+import { createVideoPlaybackUrl, isDirectR2Mp4Url } from "@/lib/media-playback-server";
 
 export const dynamic = "force-dynamic";
 
@@ -33,11 +34,12 @@ export default async function WatchRoute({ params }: PageProps) {
     published_at: _publishedAt,
     ...publicVideo
   } = video;
+  const playbackUrl = isDirectR2Mp4Url(sourceUrl) ? sourceUrl : await createVideoPlaybackUrl(id);
 
   return (
     <WatchPage
       video={publicVideo}
-      playbackUrl=""
+      playbackUrl={playbackUrl}
       playbackType={detectSourceType(sourceUrl)}
       sourceHost={getSourceHost(sourceUrl)}
       displayViews={getPublicDisplayViews(video)}

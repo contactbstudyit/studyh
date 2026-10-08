@@ -106,7 +106,7 @@ async function cancelResponse(response: Response) {
 }
 
 async function checkByteMedia(video: VideoSourceForCheck, sourceType: "mp4" | "webm", origin: string): Promise<VideoSourceCheck> {
-  const proxyUrl = new URL(createVideoPlaybackUrl(video.id), origin);
+  const proxyUrl = new URL(await createVideoPlaybackUrl(video.id), origin);
   const result = await requestProxy(proxyUrl, "bytes=0-65535");
   if ("failure" in result) return result.failure;
   const { response } = result;
@@ -265,7 +265,7 @@ async function checkDashManifest(video: VideoSourceForCheck, manifestUrl: URL, x
     const baseUrl = baseText ? new URL(baseText, manifestUrl) : manifestUrl;
     const targetUrl = reference ? new URL(reference, baseUrl) : baseUrl;
     if (targetUrl.protocol !== "https:") return { status: "internal", reason: "DASH resource did not use HTTPS" };
-    const token = createMediaResourceToken(video.id, video.video_url, baseUrl.toString(), targetUrl.toString());
+    const token = await createMediaResourceToken(video.id, video.video_url, baseUrl.toString(), targetUrl.toString());
     const proxyUrl = new URL("/api/media-proxy", origin);
     proxyUrl.searchParams.set("resource", token);
     const outcome = await probeProxyResource(proxyUrl, "bytes=0-1023");
@@ -282,7 +282,7 @@ async function checkDashManifest(video: VideoSourceForCheck, manifestUrl: URL, x
 async function checkOnce(video: VideoSourceForCheck, origin: string): Promise<VideoSourceCheck> {
   const sourceType = detectSourceType(video.video_url);
   const range = sourceType === "hls" || sourceType === "dash" ? undefined : "bytes=0-65535";
-  const rootUrl = new URL(createVideoPlaybackUrl(video.id), origin);
+  const rootUrl = new URL(await createVideoPlaybackUrl(video.id), origin);
   const root = await requestProxy(rootUrl, range);
   if ("failure" in root) return root.failure;
   const responseFailure = await classifyHttpFailure(root.response);

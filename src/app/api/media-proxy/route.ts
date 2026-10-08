@@ -116,9 +116,9 @@ function verifySignature(secret: Buffer, provided: string, source: string, base:
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
-function makeProxyUrl(requestUrl: string, source: string, base: string, target: string, secret: Buffer, videoId?: string) {
+async function makeProxyUrl(requestUrl: string, source: string, base: string, target: string, secret: Buffer, videoId?: string) {
   const proxyUrl = new URL("/api/media-proxy", requestUrl);
-  if (videoId) proxyUrl.searchParams.set("resource", createMediaResourceToken(videoId, source, base, target));
+  if (videoId) proxyUrl.searchParams.set("resource", await createMediaResourceToken(videoId, source, base, target));
   else {
     proxyUrl.searchParams.set("source", source);
     proxyUrl.searchParams.set("base", base);
@@ -132,27 +132,45 @@ function getApplicationOrigin(request: NextRequest) {
   return new URL(request.url).origin;
 }
 
-function rewriteManifest(body: string, applicationOrigin: string, source: string, manifestUrl: string, secret: Buffer, videoId?: string) {
-  const rewrite = (raw: string) => {
+async function rewriteManifest(body: string, applicationOrigin: string, source: string, manifestUrl: string, secret: Buffer, videoId?: string) {
+  const rewrite = async (raw: string) => {
     const value = raw.trim();
     try {
       const target = new URL(value, manifestUrl);
       if (target.protocol !== "http:" && target.protocol !== "https:") return raw;
       if (target.protocol !== "https:") throw new Error("Insecure playlist resource URL");
-      return makeProxyUrl(applicationOrigin, source, manifestUrl, target.toString(), secret, videoId);
+      return await makeProxyUrl(applicationOrigin, source, manifestUrl, target.toString(), secret, videoId);
     } catch (error) {
       if (error instanceof TypeError) throw new Error("Invalid URL in external HLS manifest");
       throw error;
     }
   };
 
-  return body.split(/(\r?\n)/).map((line) => {
-    if (!line || /^\r?\n$/.test(line)) return line;
+  const output: string[] = [];
+  for (const line of body.split(/(\r?\n)/)) {
+    if (!line || /^\r?\n$/.test(line)) { output.push(line); continue; }
     if (line.trimStart().startsWith("#")) {
-      return line.replace(/URI=(['"])(.*?)\1/gi, (_match, quote: string, uri: string) => `URI=${quote}${rewrite(uri)}${quote}`);
+      const matches = [...line.matchAll(/URI=(['"])(.*?)\1/gi)];
+      if (!matches.length) { output.push(line); continue; }
+      const replacements = await Promise.all(matches.map(async (match) => {
+        const quote = match[1];
+        const uri = match[2];
+        return `URI=${quote}${await rewrite(uri)}${quote}`;
+      }));
+      let rewritten = "";
+      let cursor = 0;
+      for (let matchIndex = 0; matchIndex < matches.length; matchIndex += 1) {
+        const match = matches[matchIndex];
+        const offset = match.index ?? cursor;
+        rewritten += line.slice(cursor, offset) + replacements[matchIndex];
+        cursor = offset + match[0].length;
+      }
+      output.push(rewritten + line.slice(cursor));
+      continue;
     }
-    return line.trim() ? line.replace(/^\s*([^\s].*?)\s*$/, (_match, uri: string) => rewrite(uri)) : line;
-  }).join("");
+    output.push(line.trim() ? await rewrite(line.replace(/^\s*([^\s].*?)\s*$/, "$1")) : line);
+  }
+  return output.join("");
 }
 
 function responseHeaders(request: NextRequest, upstream?: IncomingMessage, overrides?: HeadersInit) {
@@ -280,7 +298,7 @@ async function relay(request: NextRequest) {
   if (videoToken) {
     const expires = params.get("expires") ?? "";
     signature = params.get("sig");
-    if (!UUID_PATTERN.test(videoToken) || !signature || !verifyVideoPlaybackToken(videoToken, expires, signature)) return errorResponse(request, "Invalid or expired playback token", 403);
+    if (!UUID_PATTERN.test(videoToken) || !signature || !await verifyVideoPlaybackToken(videoToken, expires, signature)) return errorResponse(request, "Invalid or expired playback token", 403);
     try {
       const supabase = await createClient();
       const { data: video, error } = await supabase.from("videos").select("video_url").eq("id", videoToken).eq("published", true).maybeSingle();
@@ -290,7 +308,7 @@ async function relay(request: NextRequest) {
       opaqueVideoId = videoToken; rootRequest = true;
     } catch { return errorResponse(request, "Could not resolve playback source", 502); }
   } else if (resourceToken) {
-    const resource = readMediaResourceToken(resourceToken);
+    const resource = await readMediaResourceToken(resourceToken);
     if (!resource || !UUID_PATTERN.test(resource.videoId)) return errorResponse(request, "Invalid or expired media resource token", 403);
     opaqueVideoId = resource.videoId;
     source = resource.source; base = resource.base; targetRaw = resource.url;
@@ -330,7 +348,7 @@ async function relay(request: NextRequest) {
     const contentType = String(response.headers["content-type"] ?? "application/octet-stream");
     if (isSuccessful(status) && isManifest(finalUrl, contentType)) {
       const manifest = await readManifest(response);
-      const rewritten = rewriteManifest(manifest, getApplicationOrigin(request), source, finalUrl.toString(), secret, opaqueVideoId ?? undefined);
+      const rewritten = await rewriteManifest(manifest, getApplicationOrigin(request), source, finalUrl.toString(), secret, opaqueVideoId ?? undefined);
       const body = request.method === "HEAD" ? null : rewritten;
       const headers = responseHeaders(request, undefined, {
         "Content-Type": contentType.includes("mpegurl") || contentType.includes("m3u") ? contentType : "application/vnd.apple.mpegurl",

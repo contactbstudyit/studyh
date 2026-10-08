@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getPublicCategoryBySlug } from "@/lib/category-routes";
-import { createVideoPlaybackUrl, isDirectR2Mp4Url } from "@/lib/media-playback-server";
 import { detectSourceType, getSourceHost } from "@/lib/video-playback";
 import { getPublicDisplayViews } from "@/lib/public-view-count-server";
 
@@ -34,16 +33,16 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
 
     if (error) throw error;
 
-    const videos = await Promise.all((data ?? []).map(async (row) => {
+    const videos = (data ?? []).map((row) => {
       const { video_url: sourceUrl, views: _realViews, display_view_count: _displayBase, published_at: _publishedAt, ...video } = row;
       return {
         video,
-        playbackUrl: isDirectR2Mp4Url(sourceUrl) ? sourceUrl : await createVideoPlaybackUrl(row.id),
+        playbackUrl: sourceUrl,
         playbackType: detectSourceType(sourceUrl),
         sourceHost: getSourceHost(sourceUrl),
         displayViews: getPublicDisplayViews(row),
       };
-    }));
+    });
 
     return NextResponse.json({ videos, page, pageSize: PAGE_SIZE, hasMore: start + videos.length < (count ?? 0) }, {
       headers: { "Cache-Control": "no-store" },

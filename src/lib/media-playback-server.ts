@@ -91,24 +91,6 @@ export async function createVideoPlaybackUrl(
   return `/api/media-proxy?${params.toString()}`;
 }
 
-export function isDirectR2Mp4Url(sourceUrl: string) {
-  let url: URL;
-  try { url = new URL(sourceUrl); } catch { return false; }
-  if (url.protocol !== "https:" || url.username || url.password || (url.port && url.port !== "443") || url.search || url.hash || !/\.(?:mp4|m4v)$/i.test(url.pathname)) return false;
-
-  const hostname = url.hostname.toLowerCase();
-  if (/^pub-[a-z0-9-]+\.r2\.dev$/.test(hostname)) return true;
-
-  const configuredPublicUrl = process.env.CLOUDFLARE_R2_PUBLIC_URL || process.env.CLOUDFLARE_R2_PUBLIC_BASE_URL;
-  if (!configuredPublicUrl) return false;
-  try {
-    const publicBase = new URL(configuredPublicUrl);
-    return publicBase.protocol === "https:" && !publicBase.username && !publicBase.password && publicBase.origin === url.origin;
-  } catch {
-    return false;
-  }
-}
-
 export async function verifyVideoPlaybackToken(
   videoId: string,
   expiresValue: string,

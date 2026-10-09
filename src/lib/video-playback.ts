@@ -7,6 +7,20 @@ export type SourceProbe = {
   error: string | null;
 };
 
+const TWITTER_HLS_WORKER_ENDPOINT = "https://fansonly-stream-proxy.krpa52746.workers.dev/api/media-proxy";
+
+export function resolvePublicPlaybackUrl(sourceUrl: string) {
+  try {
+    const source = new URL(sourceUrl);
+    if (source.protocol === "https:" && source.hostname === "video.twimg.com" && /\.m3u8$/i.test(source.pathname)) {
+      const workerUrl = new URL(TWITTER_HLS_WORKER_ENDPOINT);
+      workerUrl.searchParams.set("url", source.toString());
+      return workerUrl.toString();
+    }
+  } catch { /* Leave invalid or unsupported sources unchanged for the player error path. */ }
+  return sourceUrl;
+}
+
 export function detectSourceType(url: string, contentType?: string | null): VideoSourceType {
   let pathname = "";
   try { pathname = new URL(url).pathname.toLowerCase(); } catch { pathname = url.split(/[?#]/, 1)[0].toLowerCase(); }

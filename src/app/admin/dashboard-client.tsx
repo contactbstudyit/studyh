@@ -44,6 +44,11 @@ export default function AdminDashboard() {
   const [videoCheckSummary, setVideoCheckSummary] = useState<VideoCheckSummary | null>(null);
   const [checkingVideoIds, setCheckingVideoIds] = useState<Set<string>>(() => new Set());
   const videoCheckLock = useRef(false);
+  const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
+  const [bulkDeleteBusy, setBulkDeleteBusy] = useState(false);
+  const bulkDeleteLock = useRef(false);
+  const [bulkDeleteCode, setBulkDeleteCode] = useState("");
+  const [bulkDeletePreview, setBulkDeletePreview] = useState<{ categoryId: string; categoryName: string; videoIds: string[]; count: number } | null>(null);
   const [editingVideo, setEditingVideo] = useState<VideoRecord | null>(null);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const statsHook = useLibraryStats();
@@ -163,6 +168,19 @@ export default function AdminDashboard() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [checkAllConfirmOpen]);
+
+  useEffect(() => {
+    if (!bulkDeleteDialogOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !bulkDeleteBusy) {
+        setBulkDeleteDialogOpen(false);
+        setBulkDeleteCode("");
+        setBulkDeletePreview(null);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [bulkDeleteBusy, bulkDeleteDialogOpen]);
 
   async function logout() { await createClient().auth.signOut(); router.replace("/admin/login"); router.refresh(); }
   function openVideo(video?: VideoRecord) {
@@ -489,6 +507,53 @@ export default function AdminDashboard() {
       setVideoCheckRunning(false);
     }
   }
+  async function openDeleteAllInCategory() {
+    if (!categoryFilter || mediaMaintenanceRunning || bulkDeleteBusy || bulkDeleteLock.current) return;
+    bulkDeleteLock.current = true;
+    setBulkDeleteBusy(true);
+    try {
+      const response = await fetch(`/api/admin/videos/bulk-delete?categoryId=${encodeURIComponent(categoryFilter)}`, { cache: "no-store" });
+      const preview = await response.json() as { categoryId?: string; categoryName?: string; videoIds?: string[]; count?: number; error?: string };
+      if (!response.ok || !preview.categoryId || !preview.videoIds || typeof preview.count !== "number") throw new Error(preview.error || "Could not load videos for this category");
+      if (preview.count === 0) { toast.info(`There are no videos in ${preview.categoryName || "this category"}.`); return; }
+      setBulkDeletePreview({ categoryId: preview.categoryId, categoryName: preview.categoryName || "selected category", videoIds: preview.videoIds, count: preview.count });
+      setBulkDeleteCode("");
+      setBulkDeleteDialogOpen(true);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not prepare category deletion.");
+    } finally {
+      bulkDeleteLock.current = false;
+      setBulkDeleteBusy(false);
+    }
+  }
+
+  async function confirmDeleteAllInCategory() {
+    if (!bulkDeletePreview || bulkDeleteBusy || bulkDeleteLock.current || !/^\d{6}$/.test(bulkDeleteCode)) return;
+    bulkDeleteLock.current = true;
+    setBulkDeleteBusy(true);
+    try {
+      const response = await fetch("/api/admin/videos/bulk-delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ categoryId: bulkDeletePreview.categoryId, videoIds: bulkDeletePreview.videoIds, code: bulkDeleteCode }),
+      });
+      const result = await response.json() as { deletedCount?: number; error?: string };
+      if (!response.ok || typeof result.deletedCount !== "number") throw new Error(result.error || "Could not delete category videos");
+      setBulkDeleteDialogOpen(false);
+      setBulkDeleteCode("");
+      setBulkDeletePreview(null);
+      goToVideos(1, true);
+      await Promise.all([videosHook.refresh(), statsHook.refresh()]);
+      await categoriesHook.refresh();
+      toast.success(`Deleted ${result.deletedCount} videos from ${bulkDeletePreview.categoryName}.`);
+    } catch (error) {
+      setBulkDeleteCode("");
+      toast.error(error instanceof Error ? error.message : "Could not confirm the deletion result. Refresh the category before retrying.");
+    } finally {
+      bulkDeleteLock.current = false;
+      setBulkDeleteBusy(false);
+    }
+  }
   async function toggleVideo(video: VideoRecord, field: "published" | "featured") { await videosHook.update(video.id, { [field]: !video[field] }); await statsHook.refresh(); }
   async function deleteCategory(category: Category) {
     if (!window.confirm(`Delete “${category.name}”? Categories with videos cannot be deleted.`)) return;
@@ -496,7 +561,7 @@ export default function AdminDashboard() {
   }
 
   const nav = [{ name: "Dashboard", icon: LayoutDashboard }, { name: "Videos", icon: Film }, { name: "Add Video", icon: Plus }, { name: "Categories", icon: FolderOpen }, { name: "Settings", icon: Settings }];
-  const mediaMaintenanceRunning = thumbnailBatchRunning || videoCheckRunning || videoCheckLock.current;
+  const mediaMaintenanceRunning = thumbnailBatchRunning || videoCheckRunning || videoCheckLock.current || bulkDeleteBusy;
   return <main className="dashboard-shell"><aside className="dashboard-sidebar"><a href="/" className="dash-back"><ArrowLeft size={15}/> Public library</a><div className="dash-kicker"><ShieldCheck size={15}/> ADMIN</div><nav>{nav.map(({ name, icon: Icon }) => <button key={name} className={section === name ? "dash-nav active" : "dash-nav"} onClick={() => navigateSection(name)}><Icon size={16}/>{name}</button>)}</nav><button className="dash-logout" onClick={logout}><LogOut size={15}/> Sign out</button></aside>
     <section className="dashboard-content"><header className="dashboard-top"><span>LIBRARY MANAGEMENT</span><button onClick={logout}><LogOut size={14}/> Sign out</button></header>
        {section === "Dashboard" && <><div className="admin-heading"><div><span className="eyebrow">OVERVIEW</span><h1>Dashboard</h1><p>Your library at a glance.</p></div><button className="button-primary" onClick={() => openVideo()}><Plus size={15}/> Add video</button></div><div className="stats-row"><Stat label="Total videos" value={stats?.total_videos}/><Stat label="Published" value={stats?.published_videos}/><Stat label="Categories" value={stats?.total_categories}/><Stat label="Total views" value={stats?.total_views}/></div>{showDashboardStatsDiagnostics && statsHook.diagnostic && <section className="dashboard-diagnostic" role="alert" aria-live="assertive"><h2>Dashboard statistics failed</h2><p>phase: {statsHook.diagnostic.phase}</p><p>message: {statsHook.diagnostic.message}</p><p>code: {statsHook.diagnostic.code ?? "(none)"}</p><p>details: {statsHook.diagnostic.details ?? "(none)"}</p><p>hint: {statsHook.diagnostic.hint ?? "(none)"}</p></section>}<div className="table-heading"><h2>Recently added</h2><button onClick={() => goToVideos()}>Manage videos <ArrowLeft size={13}/></button></div><VideoTable videos={videosHook.videos.slice(0, 6)} categories={categoriesHook.categories} onEdit={openVideo} onDelete={removeVideo} onToggle={toggleVideo} onGenerateThumbnail={generateThumbnailFor} generatingThumbnailIds={generatingThumbnailIds}/></>}
@@ -507,6 +572,7 @@ export default function AdminDashboard() {
               <button className="secondary-action" onClick={generateMissingThumbnails} disabled={mediaMaintenanceRunning}>{thumbnailBatchRunning ? "Generating thumbnails..." : "Generate Missing Thumbnails"}</button>
               <button className="secondary-action" onClick={() => setRegenerateAllConfirmOpen(true)} disabled={mediaMaintenanceRunning}>Regenerate All Thumbnails</button>
               <button className="secondary-action" onClick={() => setCheckAllConfirmOpen(true)} disabled={mediaMaintenanceRunning}>{videoCheckRunning ? "Checking videos..." : "Check All Videos"}</button>
+              <button className="secondary-action delete-category-videos-action" onClick={() => void openDeleteAllInCategory()} disabled={!categoryFilter || mediaMaintenanceRunning} title={categoryFilter ? "Delete every video in the selected category" : "Select a category first"}>Delete All in Category</button>
               <button className="button-primary" onClick={() => openVideo()}><Plus size={15}/> Add video</button>
             </div>
           </div>
@@ -548,6 +614,18 @@ export default function AdminDashboard() {
         <div className="category-modal-actions">
           <button className="cancel-video-button" type="button" onClick={() => setCheckAllConfirmOpen(false)}>Cancel</button>
           <button className="button-primary" type="button" disabled={mediaMaintenanceRunning} onClick={() => { setCheckAllConfirmOpen(false); void checkAllVideos(); }}>Check All Videos</button>
+        </div>
+      </section>
+    </div>}
+    {bulkDeleteDialogOpen && bulkDeletePreview && <div className="modal-backdrop bulk-delete-category-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !bulkDeleteBusy) { setBulkDeleteDialogOpen(false); setBulkDeleteCode(""); setBulkDeletePreview(null); } }}>
+      <section className="add-modal bulk-delete-category-dialog" role="alertdialog" aria-modal="true" aria-labelledby="bulk-delete-category-title" aria-describedby="bulk-delete-category-description">
+        <div className="modal-title"><div><span className="eyebrow">IRREVERSIBLE ACTION</span><h2 id="bulk-delete-category-title">Delete all videos in {bulkDeletePreview.categoryName}?</h2></div></div>
+        <p id="bulk-delete-category-description">This will permanently delete all {bulkDeletePreview.count} video records in this category. This cannot be undone. Thumbnails and other stored assets are not changed.</p>
+        <label className="bulk-delete-otp-label" htmlFor="bulk-delete-totp">Enter your 6-digit one-time authenticator code</label>
+        <input id="bulk-delete-totp" className="bulk-delete-otp-input" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} value={bulkDeleteCode} onChange={(event) => setBulkDeleteCode(event.target.value.replace(/\D/g, "").slice(0, 6))} disabled={bulkDeleteBusy}/>
+        <div className="category-modal-actions">
+          <button className="cancel-video-button" type="button" onClick={() => { setBulkDeleteDialogOpen(false); setBulkDeleteCode(""); setBulkDeletePreview(null); }} disabled={bulkDeleteBusy}>Cancel</button>
+          <button className="danger-action" type="button" onClick={() => void confirmDeleteAllInCategory()} disabled={bulkDeleteBusy || bulkDeleteCode.length !== 6}>{bulkDeleteBusy ? "Deleting…" : "Delete All Videos"}</button>
         </div>
       </section>
     </div>}

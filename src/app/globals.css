@@ -183,6 +183,16 @@ body { background: #000; color: #fff; font-family: var(--font-geist-sans), syste
 .video-check-confirm-dialog .modal-title h2 { margin: 7px 0 0; font-size: 22px; font-weight: 600; }
 .video-check-confirm-dialog > p { margin: 0 0 20px; color: #a5a39d; font-size: 12px; line-height: 1.65; }
 .video-check-action:disabled { opacity: .55; cursor: wait; }
+.delete-category-videos-action { border-color: rgba(184,95,85,.5); color: #d2a49e; }
+.danger-action { min-height: 36px; padding: 0 13px; border: 1px solid rgba(184,95,85,.65); border-radius: 2px; background: #542c29; color: #f4d5d1; font-size: 10px; letter-spacing: .45px; cursor: pointer; }
+.danger-action:hover:not(:disabled) { background: #673531; }
+.danger-action:disabled { opacity: .5; cursor: not-allowed; }
+.bulk-delete-category-dialog .modal-title { margin-bottom: 12px; }
+.bulk-delete-category-dialog .modal-title h2 { margin: 7px 0 0; font-size: 22px; font-weight: 600; }
+.bulk-delete-category-dialog > p { margin: 0 0 18px; color: #d1a9a4; font-size: 12px; line-height: 1.65; }
+.bulk-delete-otp-label { display: block; margin: 0 0 7px; color: #b8b5ae; font-size: 10px; }
+.bulk-delete-otp-input { width: 100%; min-height: 40px; margin-bottom: 18px; padding: 0 11px; border: 1px solid var(--line); border-radius: 2px; background: #0a0a09; color: #f1eee7; font: inherit; letter-spacing: 3px; }
+.bulk-delete-otp-input:focus { border-color: #827d70; outline: none; }
 .video-check-results { margin-top: 26px; border: 1px solid var(--line); background: #10100f; padding: 17px; }
 .video-check-results-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 9px; }
 .video-check-results-heading h2 { margin: 0; font: 400 20px Georgia,serif; }

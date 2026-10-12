@@ -46,6 +46,7 @@ export async function GET(request: NextRequest) {
     const videoIds = await readCategoryVideoIds(auth.client, categoryId);
     return NextResponse.json({ categoryId, categoryName: category.name, videoIds, count: videoIds.length }, { headers: { "Cache-Control": "no-store" } });
   } catch {
+    if (process.env.NODE_ENV === "development") console.error("[admin-video-bulk-delete] category video lookup failed");
     return NextResponse.json({ error: "Could not load videos for this category" }, { status: 500, headers: { "Cache-Control": "no-store" } });
   }
 }
@@ -79,19 +80,17 @@ export async function POST(request: NextRequest) {
     const { data: membership, error: membershipError } = await auth.client.from("admins").select("user_id").eq("user_id", user.id).maybeSingle();
     if (membershipError || !membership) return NextResponse.json({ error: "Admin authorization required" }, { status: 403 });
 
-    const { data: currentIds, error: currentError } = await auth.client.from("videos").select("id").eq("category_id", body.categoryId).order("created_at", { ascending: false }).order("id", { ascending: false }).range(0, MAX_CATEGORY_VIDEO_IDS);
-    if (currentError) throw currentError;
-    const currentSet = new Set((currentIds ?? []).map((video) => video.id));
-    if (currentSet.size > MAX_CATEGORY_VIDEO_IDS) return NextResponse.json({ error: "Category contains too many videos for one confirmed delete" }, { status: 413 });
+    const currentIds = await readCategoryVideoIds(auth.client, body.categoryId);
+    const currentSet = new Set(currentIds);
     if (currentSet.size !== expectedIds.length || expectedIds.some((id) => !currentSet.has(id))) {
       return NextResponse.json({ error: "The category changed after confirmation. Review the updated count and confirm again." }, { status: 409 });
     }
 
-    const { data: deleted, error: deleteError } = await auth.client.from("videos").delete().eq("category_id", body.categoryId).in("id", expectedIds).select("id");
+    const { data: deleted, error: deleteError } = await auth.client.from("videos").delete().eq("category_id", body.categoryId).select("id");
     if (deleteError) throw deleteError;
-    if ((deleted ?? []).length !== expectedIds.length) return NextResponse.json({ error: "The category changed during deletion. Refresh and review the remaining videos." }, { status: 409 });
     return NextResponse.json({ categoryId: body.categoryId, deletedCount: deleted.length }, { status: 200, headers: { "Cache-Control": "no-store" } });
   } catch {
+    if (process.env.NODE_ENV === "development") console.error("[admin-video-bulk-delete] verified delete failed", { categoryId: body.categoryId, videoCount: expectedIds.length });
     return NextResponse.json({ error: "Bulk deletion failed. No video metadata was changed outside the selected category." }, { status: 500, headers: { "Cache-Control": "no-store" } });
   }
 }

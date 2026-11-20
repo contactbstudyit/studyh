@@ -235,6 +235,16 @@ body { background: #000; color: #fff; font-family: var(--font-geist-sans), syste
 .bulk-upload-item.saved .bulk-upload-item-heading span { color: #9eb39d; }
 .bulk-upload-item.failed { border-color: rgba(184,95,85,.38); }
 .bulk-upload-item.failed .bulk-upload-item-heading span { color: #d2a49e; }
+.admin-password-settings { max-width: 720px; margin-top: 18px; padding: 17px; border: 1px solid var(--line); background: #10100f; }
+.admin-password-settings-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.admin-password-settings-heading > div { display: grid; gap: 5px; }
+.admin-password-settings-heading strong { color: #e1ded6; font-size: 12px; font-weight: 500; }
+.admin-password-settings-heading span { color: #8d8a82; font-size: 10px; }
+.admin-password-form { display: grid; gap: 13px; max-width: 480px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+.admin-password-form label { display: grid; gap: 6px; color: #aaa79f; font-size: 9px; letter-spacing: 1px; }
+.admin-password-form input { width: 100%; min-height: 42px; padding: 10px; border: 1px solid var(--line); border-radius: 2px; background: #090908; color: #eeeae1; font-size: 14px; letter-spacing: normal; }
+.admin-password-form input:focus { border-color: #817b6d; outline: none; }
+.admin-password-form small { color: #85827a; font-size: 10px; letter-spacing: normal; }
 .cloudflare-video-account-picker { display: grid; gap: 7px; margin: 0 0 16px; }
 .cloudflare-video-account-picker > label { color: #b5b2ab; font-size: 9px; letter-spacing: 1.2px; }
 .cloudflare-video-account-controls { display: flex; gap: 8px; align-items: stretch; }

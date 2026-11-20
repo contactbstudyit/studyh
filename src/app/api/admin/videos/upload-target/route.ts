@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getAdminMfaStatus, hasAdminTotpAal2 } from "@/lib/admin-mfa";
 import { createVideoUploadTarget } from "@/lib/r2-storage";
+import { CloudflareVideoAccountRecord, decryptCloudflareCredential } from "@/lib/cloudflare-video-accounts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,7 +28,10 @@ export async function POST(request: NextRequest) {
   const auth = await authorizeAdmin();
   if ("error" in auth) return NextResponse.json({ error: auth.error }, { status: auth.status, headers: { "Cache-Control": "no-store" } });
   try {
-    const body = await request.json() as { filename?: unknown; contentType?: unknown; size?: unknown };
+    const body = await request.json() as { filename?: unknown; contentType?: unknown; size?: unknown; storageAccountId?: unknown };
+    if (typeof body.storageAccountId !== "string" || !/^[0-9a-f-]{36}$/i.test(body.storageAccountId)) {
+      return NextResponse.json({ error: "Choose a Cloudflare video storage account" }, { status: 400 });
+    }
     const contentType = body.contentType;
     if (typeof body.filename !== "string" || body.filename.length < 1 || body.filename.length > 255) {
       return NextResponse.json({ error: "Choose a valid video filename" }, { status: 400 });
@@ -39,7 +43,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Video file must be between 1 byte and 10 GB" }, { status: 413 });
     }
 
-    const target = await createVideoUploadTarget(body.filename, contentType, body.size);
+    const { data: row, error: accountError } = await auth.supabase.from("cloudflare_video_accounts").select("*").eq("id", body.storageAccountId).eq("is_active", true).maybeSingle();
+    if (accountError || !row) return NextResponse.json({ error: "Selected Cloudflare account is unavailable" }, { status: 404 });
+    const account = row as CloudflareVideoAccountRecord;
+    const target = await createVideoUploadTarget({
+      id: account.id,
+      accountId: account.account_id,
+      accessKeyId: decryptCloudflareCredential(account.access_key_id_ciphertext),
+      secretAccessKey: decryptCloudflareCredential(account.secret_access_key_ciphertext),
+      endpoint: account.endpoint,
+      bucketName: account.bucket_name,
+      publicUrl: account.public_url,
+    }, body.filename, contentType, body.size);
     return NextResponse.json(target, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     if (process.env.NODE_ENV === "development") console.error("[admin-video-upload] Could not prepare direct video upload", { errorType: error instanceof Error ? error.name : "UnknownError" });

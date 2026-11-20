@@ -1,6 +1,6 @@
 # Supabase setup
 
-1. Apply pending migrations in order in the Supabase SQL Editor. The current sequence is `202610010001_video_library.sql` through `202610010009_revoke_public_stats_rpc.sql`; do not re-run migrations already applied.
+1. Apply pending migrations in order in the Supabase SQL Editor. The current sequence is `202610010001_video_library.sql` through `202610010010_cloudflare_video_accounts.sql`; do not re-run migrations already applied.
 2. In Supabase Authentication, create the user `contact.eonemusic@gmail.com` with the password you intend to use. Email confirmation can remain disabled.
 3. Grant admin membership to that Auth user in the SQL Editor:
 
@@ -23,3 +23,9 @@ Admin sign-in requires the existing email/password followed by a verified Supaba
 In Supabase Auth settings, keep TOTP enrollment, challenge, and verification enabled. Supabase Auth owns the TOTP secret, challenge, verification, and rate limiting; no application OTP table or email/Resend configuration is used for this flow.
 
 The required environment values are `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` (a Supabase publishable key is also accepted as the key value). Public videos and categories are readable through RLS; all mutations require an authenticated user whose ID exists in `public.admins`.
+
+## Separate Cloudflare video accounts
+
+Apply migration `202610010010_cloudflare_video_accounts.sql` before using the Cloudflare video account manager. Set `CLOUDFLARE_ACCOUNT_ENCRYPTION_KEY` as a server-only secret: it must be a base64 encoding of exactly 32 cryptographically random bytes. It encrypts R2 access keys before they are stored in the admin-only account table. Keep it backed up securely; changing it makes saved account credentials unreadable until they are re-entered.
+
+The video bucket's R2 CORS policy must allow `PUT` requests with the `Content-Type` header from the production site and each active preview origin. The presigned upload URL is short-lived and scoped to a single object in the selected bucket. Existing `CLOUDFLARE_R2_*` thumbnail credentials remain separate and are not changed by the video account manager.

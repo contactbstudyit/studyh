@@ -23,7 +23,7 @@ export async function getPublicCategoryBySlug(slug: string) {
 
 export async function getPublicVideoById(id: string): Promise<VideoRecord | null> {
   const supabase = await createClient();
-  const { data, error } = await supabase.from("videos").select("*, categories(name)").eq("id", id).eq("published", true).maybeSingle();
+  const { data, error } = await supabase.from("videos").select("id,title,video_url,description,thumbnail_url,category_id,tags,duration,views,display_view_count,published_at,featured,published,created_at,updated_at,categories(name)").eq("id", id).eq("published", true).maybeSingle();
   if (error) throw error;
   return data as VideoRecord | null;
 }

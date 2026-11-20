@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 
 export type Category = { id: string; name: string; description: string; image_url: string | null; created_at: string; updated_at: string; video_count?: number };
 export type CategoryOption = Pick<Category, "id" | "name">;
-export type VideoRecord = { id: string; title: string; video_url: string; description: string; thumbnail_url: string | null; category_id: string; tags: string[]; duration: string; views: number; display_view_count: number; display_views?: number; published_at: string | null; featured: boolean; published: boolean; created_at: string; updated_at: string; categories?: { name: string } | null };
+export type VideoRecord = { id: string; title: string; video_url: string; cloudflare_video_account_id?: string | null; cloudflare_video_bucket_name?: string | null; description: string; thumbnail_url: string | null; category_id: string; tags: string[]; duration: string; views: number; display_view_count: number; display_views?: number; published_at: string | null; featured: boolean; published: boolean; created_at: string; updated_at: string; categories?: { name: string } | null };
 export type LibraryStats = { total_videos: number; published_videos: number; total_categories: number; total_views: number };
 export type LibraryStatsDiagnostic = { phase: "Supabase RPC call" | "admin authorization check" | "response parsing/type conversion"; message: string; code: string | null; details: string | null; hint: string | null };
 export type VideoSort = "latest" | "oldest" | "most-watched" | "least-watched" | "a-z" | "z-a" | "random" | "most-liked" | "highest-rated" | "lowest-rated";
@@ -195,7 +195,8 @@ export function useVideos(options: { categoryId?: string; search?: string; searc
         return;
       }
       const client = createClient();
-      let request = client.from("videos").select("*, categories(name)", pageNumber === undefined ? undefined : { count: "exact" });
+      const publicVideoFields = "id,title,video_url,description,thumbnail_url,category_id,tags,duration,views,display_view_count,published_at,featured,published,created_at,updated_at,categories(name)";
+      let request = client.from("videos").select(admin ? "*, categories(name)" : publicVideoFields, pageNumber === undefined ? undefined : { count: "exact" });
       if (sort === "oldest") request = request.order("created_at", { ascending: true });
       else if (sort === "most-watched") request = request.order("views", { ascending: false }).order("created_at", { ascending: false });
       else if (sort === "least-watched") request = request.order("views", { ascending: true }).order("created_at", { ascending: false });
@@ -214,7 +215,7 @@ export function useVideos(options: { categoryId?: string; search?: string; searc
       request = request.range(currentPage * currentPageSize, currentPage * currentPageSize + currentPageSize - 1);
       const { data, error, count } = await request;
       if (error) throw error;
-      const rows = (data ?? []) as VideoRecord[];
+      const rows = (data ?? []) as unknown as VideoRecord[];
       setVideos((old) => append ? [...old, ...rows] : rows);
       if (pageNumber !== undefined) {
         const exactCount = count ?? 0;

@@ -5,51 +5,37 @@ import { randomUUID } from "node:crypto";
 type R2Configuration = { client: S3Client; bucket: string; publicBaseUrl: URL };
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 let cachedClient: { key: string; client: S3Client } | null = null;
-let cachedVideoClient: { key: string; client: S3Client } | null = null;
+export type VideoR2AccountConfiguration = {
+  id: string;
+  accountId: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  endpoint: string;
+  bucketName: string;
+  publicUrl: string;
+};
+const cachedVideoClients = new Map<string, { key: string; client: S3Client }>();
 
-type VideoR2Configuration = { client: S3Client; bucket: string; publicBaseUrl: URL };
-
-function getVideoConfiguration(): VideoR2Configuration {
-  const accountId = process.env.CLOUDFLARE_VIDEO_R2_ACCOUNT_ID_2;
-  const accessKeyId = process.env.CLOUDFLARE_VIDEO_R2_ACCESS_KEY_ID_2;
-  const secretAccessKey = process.env.CLOUDFLARE_VIDEO_R2_SECRET_ACCESS_KEY_2;
-  const bucket = process.env.CLOUDFLARE_VIDEO_R2_BUCKET_NAME_2;
-  const publicBase = process.env.CLOUDFLARE_VIDEO_R2_PUBLIC_URL_2;
-  const missing = [
-    ["CLOUDFLARE_VIDEO_R2_ACCOUNT_ID_2", accountId],
-    ["CLOUDFLARE_VIDEO_R2_ACCESS_KEY_ID_2", accessKeyId],
-    ["CLOUDFLARE_VIDEO_R2_SECRET_ACCESS_KEY_2", secretAccessKey],
-    ["CLOUDFLARE_VIDEO_R2_BUCKET_NAME_2", bucket],
-    ["CLOUDFLARE_VIDEO_R2_PUBLIC_URL_2", publicBase],
-  ].filter(([, value]) => !value).map(([name]) => name);
-  if (missing.length) throw new Error(`Video R2 upload is not configured. Missing server environment variables: ${missing.join(", ")}`);
-
+function getVideoClient(account: VideoR2AccountConfiguration) {
+  const expectedEndpoint = `https://${account.accountId}.r2.cloudflarestorage.com`;
+  if (!/^[a-f0-9]{32}$/i.test(account.accountId) || account.endpoint !== expectedEndpoint) throw new Error("Invalid Cloudflare R2 account endpoint");
   let publicBaseUrl: URL;
-  try { publicBaseUrl = new URL(publicBase!); } catch { throw new Error("Video R2 public URL must be an HTTPS custom domain"); }
-  if (publicBaseUrl.protocol !== "https:" || publicBaseUrl.username || publicBaseUrl.password || publicBaseUrl.search || publicBaseUrl.hash) {
-    throw new Error("Video R2 public URL must be a clean HTTPS URL without credentials, query, or fragment");
+  try { publicBaseUrl = new URL(account.publicUrl); } catch { throw new Error("Video R2 public URL must be HTTPS"); }
+  if (publicBaseUrl.protocol !== "https:" || publicBaseUrl.username || publicBaseUrl.password || publicBaseUrl.search || publicBaseUrl.hash) throw new Error("Video R2 public URL must be a clean HTTPS URL");
+  const cacheKey = `${account.endpoint}:${account.bucketName}:${account.accessKeyId}:${account.secretAccessKey}`;
+  let cached = cachedVideoClients.get(account.id);
+  if (!cached || cached.key !== cacheKey) {
+    cached?.client.destroy();
+    cached = { key: cacheKey, client: new S3Client({ region: "auto", endpoint: account.endpoint, forcePathStyle: true, credentials: { accessKeyId: account.accessKeyId, secretAccessKey: account.secretAccessKey } }) };
+    cachedVideoClients.set(account.id, cached);
   }
   publicBaseUrl.pathname = publicBaseUrl.pathname.replace(/\/+$/, "");
-
-  const cacheKey = `${accountId}:${accessKeyId}:${secretAccessKey}:${bucket}`;
-  if (!cachedVideoClient || cachedVideoClient.key !== cacheKey) {
-    cachedVideoClient?.client.destroy();
-    cachedVideoClient = {
-      key: cacheKey,
-      client: new S3Client({
-        region: "auto",
-        endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
-        forcePathStyle: true,
-        credentials: { accessKeyId: accessKeyId!, secretAccessKey: secretAccessKey! },
-      }),
-    };
-  }
-  return { client: cachedVideoClient.client, bucket: bucket!, publicBaseUrl };
+  return { client: cached.client, bucket: account.bucketName, publicBaseUrl };
 }
 
-export async function createVideoUploadTarget(filename: string, contentType: "video/mp4" | "video/webm", size: number) {
+export async function createVideoUploadTarget(account: VideoR2AccountConfiguration, filename: string, contentType: "video/mp4" | "video/webm", size: number) {
   if (!Number.isSafeInteger(size) || size <= 0 || size > 10 * 1024 * 1024 * 1024) throw new Error("Video size must be between 1 byte and 10 GB");
-  const config = getVideoConfiguration();
+  const config = getVideoClient(account);
   const extension = contentType === "video/mp4" ? "mp4" : "webm";
   const safeFilename = filename.normalize("NFKC").replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^[-.]+|[-.]+$/g, "").slice(-100) || `video.${extension}`;
   const key = `videos/${randomUUID()}/${safeFilename}`;
@@ -62,7 +48,7 @@ export async function createVideoUploadTarget(filename: string, contentType: "vi
   });
   const uploadUrl = await getSignedUrl(config.client as never, command as never, { expiresIn: 900 });
   const publicUrl = `${config.publicBaseUrl.toString().replace(/\/$/, "")}/${key.split("/").map(encodeURIComponent).join("/")}`;
-  return { uploadUrl, publicUrl, contentType, expiresIn: 900 };
+  return { uploadUrl, publicUrl, contentType, expiresIn: 900, storageAccountId: account.id, bucketName: account.bucketName };
 }
 
 function getConfiguration(): R2Configuration {

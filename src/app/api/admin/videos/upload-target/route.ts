@@ -6,7 +6,7 @@ import { createVideoUploadTarget } from "@/lib/r2-storage";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const MAX_VIDEO_BYTES = 5 * 1024 * 1024 * 1024;
+const MAX_VIDEO_BYTES = 10 * 1024 * 1024 * 1024;
 
 async function authorizeAdmin() {
   try {
@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Only MP4 and WebM video uploads are supported" }, { status: 415 });
     }
     if (typeof body.size !== "number" || !Number.isSafeInteger(body.size) || body.size <= 0 || body.size > MAX_VIDEO_BYTES) {
-      return NextResponse.json({ error: "Video file must be between 1 byte and 5 GB" }, { status: 413 });
+      return NextResponse.json({ error: "Video file must be between 1 byte and 10 GB" }, { status: 413 });
     }
 
     const target = await createVideoUploadTarget(body.filename, contentType, body.size);

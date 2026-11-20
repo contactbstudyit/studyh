@@ -48,7 +48,7 @@ function getVideoConfiguration(): VideoR2Configuration {
 }
 
 export async function createVideoUploadTarget(filename: string, contentType: "video/mp4" | "video/webm", size: number) {
-  if (!Number.isSafeInteger(size) || size <= 0 || size > 5 * 1024 * 1024 * 1024) throw new Error("Video size must be between 1 byte and 5 GB");
+  if (!Number.isSafeInteger(size) || size <= 0 || size > 10 * 1024 * 1024 * 1024) throw new Error("Video size must be between 1 byte and 10 GB");
   const config = getVideoConfiguration();
   const extension = contentType === "video/mp4" ? "mp4" : "webm";
   const safeFilename = filename.normalize("NFKC").replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^[-.]+|[-.]+$/g, "").slice(-100) || `video.${extension}`;

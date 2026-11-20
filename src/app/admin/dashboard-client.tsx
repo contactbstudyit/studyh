@@ -23,6 +23,47 @@ function getVideoUploadContentType(file: File): "video/mp4" | "video/webm" | nul
 type VideoCheckStatus = "working" | "recovered" | "temporary" | "broken" | "unpublished" | "skipped";
 type VideoCheckResult = { videoId: string; title: string; status: VideoCheckStatus; reason: string; action: string };
 type VideoCheckSummary = { checked: number; working: number; recovered: number; temporary: number; unpublished: number; skipped: number };
+type BulkUploadItem = { id: string; file: File; title: string; progress: number; status: "queued" | "uploading" | "saving" | "saved" | "failed"; error?: string; uploadedUrl?: string };
+
+function titleFromVideoFilename(filename: string) {
+  const basename = filename.replace(/\\/g, "/").split("/").pop() ?? filename;
+  return basename
+    .replace(/\.(?:mp4|webm)$/i, "")
+    .replace(/\([^)]*\)|\[[^\]]*\]|\{[^}]*\}/g, " ")
+    .replace(/(?:^|[\s._-])(?:copy|duplicate)(?:[\s._-]*\d*)?$/i, " ")
+    .replace(/[._]+/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^[\s_-]+|[\s_-]+$/g, "")
+    .slice(0, 180);
+}
+
+async function uploadVideoFileDirectly(file: File, onProgress: (percentage: number) => void) {
+  const contentType = getVideoUploadContentType(file);
+  if (!contentType) throw new Error("Choose an MP4 or WebM file with a matching file extension.");
+  if (file.size <= 0 || file.size > MAX_DIRECT_VIDEO_UPLOAD_BYTES) throw new Error("Video files must be between 1 byte and 10 GB.");
+  const targetResponse = await fetch("/api/admin/videos/upload-target", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filename: file.name, contentType, size: file.size }),
+  });
+  const target = await targetResponse.json() as { uploadUrl?: string; publicUrl?: string; contentType?: string; error?: string };
+  if (!targetResponse.ok || !target.uploadUrl || !target.publicUrl || target.contentType !== contentType) throw new Error(target.error || "Could not prepare the secure video upload.");
+  await new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", target.uploadUrl!);
+    xhr.withCredentials = false;
+    xhr.timeout = 60 * 60 * 1000;
+    xhr.setRequestHeader("Content-Type", contentType);
+    xhr.upload.onprogress = (event) => { if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100)); };
+    xhr.onload = () => xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`Cloudflare R2 upload failed (HTTP ${xhr.status}). Check the video bucket CORS settings.`));
+    xhr.onerror = () => reject(new Error("Cloudflare R2 upload was blocked or interrupted. Check the video bucket CORS settings and try again."));
+    xhr.ontimeout = () => reject(new Error("Video upload timed out. Check your connection and try again."));
+    xhr.onabort = () => reject(new Error("Video upload was cancelled."));
+    xhr.send(file);
+  });
+  onProgress(100);
+  return target.publicUrl;
+}
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -37,9 +78,10 @@ export default function AdminDashboard() {
   const [categoryFormError, setCategoryFormError] = useState("");
   const [selectedCategoryId, setSelectedCategoryId] = useState("");
   const [videoSubmitInProgress, setVideoSubmitInProgress] = useState(false);
-  const [videoInputMode, setVideoInputMode] = useState<"url" | "upload">("url");
+  const [videoInputMode, setVideoInputMode] = useState<"url" | "upload" | "bulk">("url");
   const [videoUrlInput, setVideoUrlInput] = useState("");
   const [selectedVideoFile, setSelectedVideoFile] = useState<File | null>(null);
+  const [bulkUploadItems, setBulkUploadItems] = useState<BulkUploadItem[]>([]);
   const [stagedUploadedVideoUrl, setStagedUploadedVideoUrl] = useState("");
   const [videoUploadProgress, setVideoUploadProgress] = useState<number | null>(null);
   const [videoUploadError, setVideoUploadError] = useState("");
@@ -203,6 +245,7 @@ export default function AdminDashboard() {
     setVideoInputMode("url");
     setVideoUrlInput(video?.video_url ?? "");
     setSelectedVideoFile(null);
+    setBulkUploadItems([]);
     setStagedUploadedVideoUrl("");
     setVideoUploadProgress(null);
     setVideoUploadError("");
@@ -214,6 +257,7 @@ export default function AdminDashboard() {
 
   async function submitVideo(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); const form = new FormData(event.currentTarget);
+    if (videoInputMode === "bulk") { await submitBulkVideoFiles(form); return; }
     let url = videoUrlInput.trim();
     const validHttps = (value: string) => { try { const parsed = new URL(value); return parsed.protocol === "https:" && !parsed.username && !parsed.password; } catch { return false; } };
     if (videoInputMode === "upload") {
@@ -293,6 +337,69 @@ export default function AdminDashboard() {
     void categoriesHook.refresh();
     void statsHook.refresh();
     if (!thumbnail) void generateThumbnailFor(savedVideo);
+  }
+  async function submitBulkVideoFiles(form: FormData) {
+    const pending = bulkUploadItems.filter((item) => item.status !== "saved");
+    if (pending.length === 0) { toast.info("Choose videos to upload first."); return; }
+    const categoryId = String(form.get("category_id") ?? "");
+    if (!categoryId) { setVideoUploadError("Choose a category for these videos."); return; }
+    const invalid = pending.find((item) => !getVideoUploadContentType(item.file) || item.file.size <= 0 || item.file.size > MAX_DIRECT_VIDEO_UPLOAD_BYTES || !item.title);
+    if (invalid) {
+      setBulkUploadItems((current) => current.map((item) => item.id === invalid.id ? { ...item, status: "failed", error: !item.title ? "Filename does not contain a usable title." : !getVideoUploadContentType(item.file) ? "Only MP4 or WebM files are supported." : "File must be smaller than or equal to 10 GB." } : item));
+      return;
+    }
+
+    if (videoSubmitLock.current) return;
+    videoSubmitLock.current = true;
+    setVideoSubmitInProgress(true);
+    setVideoUploadError("");
+    let succeeded = 0;
+    let failed = 0;
+    const sharedTags = String(form.get("tags") ?? "").split(",").map((tag) => tag.trim()).filter(Boolean);
+    if (sharedTags.length > 30) {
+      videoSubmitLock.current = false;
+      setVideoSubmitInProgress(false);
+      setVideoUploadError("Use no more than 30 shared tags for this batch.");
+      return;
+    }
+    const sharedFields = {
+      description: String(form.get("description") ?? "").trim(),
+      category_id: categoryId,
+      tags: sharedTags,
+      duration: "",
+      featured: form.get("featured") === "on",
+      published: form.get("published") === "on",
+    };
+
+    try {
+      for (const batchItem of pending) {
+        setBulkUploadItems((current) => current.map((item) => item.id === batchItem.id ? { ...item, status: "uploading", error: undefined, progress: item.uploadedUrl ? 100 : 0 } : item));
+        try {
+          let publicUrl = batchItem.uploadedUrl;
+          if (!publicUrl) {
+            publicUrl = await uploadVideoFileDirectly(batchItem.file, (progress) => {
+              setBulkUploadItems((current) => current.map((item) => item.id === batchItem.id ? { ...item, progress } : item));
+            });
+            setBulkUploadItems((current) => current.map((item) => item.id === batchItem.id ? { ...item, uploadedUrl: publicUrl, progress: 100 } : item));
+          }
+          setBulkUploadItems((current) => current.map((item) => item.id === batchItem.id ? { ...item, status: "saving" } : item));
+          const saved = await videosHook.create({ ...sharedFields, title: batchItem.title, video_url: publicUrl, thumbnail_url: null });
+          if (!saved) throw new Error("Upload finished, but the video record could not be saved. Retry to save it without uploading the file again.");
+          setBulkUploadItems((current) => current.map((item) => item.id === batchItem.id ? { ...item, status: "saved", progress: 100, error: undefined } : item));
+          succeeded++;
+          void generateThumbnailFor(saved, { quiet: true, refreshAfter: false });
+        } catch (error) {
+          failed++;
+          setBulkUploadItems((current) => current.map((item) => item.id === batchItem.id ? { ...item, status: "failed", error: error instanceof Error ? error.message : "Upload failed. Try again." } : item));
+        }
+      }
+      await Promise.all([videosHook.refresh(), statsHook.refresh(), categoriesHook.refresh()]);
+      if (failed) toast.warning(`Bulk upload finished: ${succeeded} saved, ${failed} failed. Retry failed items below.`);
+      else toast.success(`${succeeded} videos uploaded and saved.`);
+    } finally {
+      videoSubmitLock.current = false;
+      setVideoSubmitInProgress(false);
+    }
   }
   async function submitCategory(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); const form = new FormData(event.currentTarget);
@@ -659,7 +766,7 @@ export default function AdminDashboard() {
            {videoCheckResults.length > 0 && <div className="video-check-table-wrap"><table className="video-check-table"><thead><tr><th>Video</th><th>Status</th><th>Reason</th><th>Action</th></tr></thead><tbody>{videoCheckResults.map((result) => <tr key={result.videoId}><td>{result.title}</td><td>{videoCheckStatusLabel(result.status, result.action)}</td><td>{result.reason}</td><td>{result.action}</td></tr>)}</tbody></table></div>}
          </section>}
        </>}
-      {section === "Add Video" && <><div className="admin-heading add-video-heading"><div><span className="eyebrow">LIBRARY</span><h1>{editingVideo ? "Edit video" : "Add video"}</h1><p>Videos can be linked directly or uploaded to your video storage.</p></div></div><div className="video-editor-card"><form key={editingVideo?.id ?? "new-video"} onSubmit={submitVideo}><div className="video-source-mode" role="group" aria-label="Video source"><button type="button" className={videoInputMode === "upload" ? "active" : ""} aria-pressed={videoInputMode === "upload"} disabled={videoSubmitInProgress} onClick={() => { setVideoInputMode("upload"); setVideoUploadError(""); }}>Upload video</button><button type="button" className={videoInputMode === "url" ? "active" : ""} aria-pressed={videoInputMode === "url"} disabled={videoSubmitInProgress} onClick={() => { setVideoInputMode("url"); setVideoUploadError(""); }}>Add URL</button></div>{videoInputMode === "url" ? <label>VIDEO URL<input name="video_url" type="url" required placeholder="https://cdn.example.com/video.mp4" value={videoUrlInput} onChange={(event) => setVideoUrlInput(event.target.value)}/><small>External HTTPS URL. Video playback uses this source directly.</small></label> : <div className="video-upload-field"><label htmlFor="video-file">VIDEO FILE</label><input id="video-file" type="file" accept="video/mp4,video/webm,.mp4,.webm" disabled={videoSubmitInProgress} onChange={(event) => { const file = event.currentTarget.files?.[0] ?? null; setSelectedVideoFile(file); setStagedUploadedVideoUrl(""); setVideoUploadProgress(null); setVideoUploadError(""); }}/><small>MP4 or WebM, up to 10 GB. Uploads go directly to the separate video bucket, not through Vercel.</small>{selectedVideoFile && <p className="video-upload-file-summary">{selectedVideoFile.name} · {(selectedVideoFile.size / (1024 * 1024)).toFixed(1)} MB</p>}{videoUploadProgress !== null && <div className="video-upload-progress" role="status"><span>{videoUploadProgress < 100 ? `Uploading video… ${videoUploadProgress}%` : "Upload complete. Saving video details…"}</span><progress max="100" value={videoUploadProgress}/></div>}{videoUploadError && <p className="field-error" role="alert">{videoUploadError}</p>}</div>}<label>TITLE<input name="title" required maxLength={180} defaultValue={editingVideo?.title}/></label><div className="category-field"><label htmlFor="video-category">CATEGORY</label><div className="category-control-row"><select id="video-category" name="category_id" required value={selectedCategoryId} onChange={(event) => setSelectedCategoryId(event.target.value)} disabled={categoryOptionsHook.loading || (Boolean(categoryOptionsHook.error) && categoryOptionsHook.categories.length === 0)}><option value="" disabled>{categoryOptionsHook.loading ? "Loading categories..." : categoryOptionsHook.error ? "Categories unavailable" : categoryOptionsHook.categories.length ? "Select category" : "No categories yet — Create category"}</option>{categoryOptionsHook.categories.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}</select><button className="create-category-inline" type="button" onClick={() => openCategory(undefined, true)}><Plus size={14}/> Create category</button></div>{categoryOptionsHook.error && <p className="field-error" role="alert">Could not load categories: {categoryOptionsHook.error} <button type="button" onClick={() => void categoryOptionsHook.refresh()}>Retry</button></p>}{!categoryOptionsHook.error && !categoryOptionsHook.loading && categoryOptionsHook.categories.length === 0 && <p className="field-empty">No categories yet — Create category</p>}</div><label>DESCRIPTION<textarea name="description" rows={3} defaultValue={editingVideo?.description}/></label><label>THUMBNAIL URL<input name="thumbnail_url" type="url" placeholder="https://..." defaultValue={editingVideo?.thumbnail_url ?? ""}/><small>Optional — leave empty to automatically generate a thumbnail from the video.</small></label><label>TAGS<input name="tags" placeholder="documentary, travel" defaultValue={editingVideo?.tags.join(", ")}/></label><label>DURATION<input name="duration" placeholder="12:34" defaultValue={editingVideo?.duration}/></label><div className="check-row"><label><input type="checkbox" name="featured" defaultChecked={editingVideo?.featured}/> Featured</label><label><input type="checkbox" name="published" defaultChecked={editingVideo?.published ?? true}/> Published</label></div><div className="video-form-actions"><button className="button-primary submit-button" type="submit" disabled={videoSubmitInProgress}>{videoSubmitInProgress ? (videoUploadProgress !== null && videoUploadProgress < 100 ? `Uploading… ${videoUploadProgress}%` : "Saving…") : editingVideo ? "Save changes" : "Add video"}</button><button className="cancel-video-button" type="button" onClick={() => { setEditingVideo(null); setSection("Videos"); }}>Cancel</button></div></form></div></>}
+      {section === "Add Video" && <><div className="admin-heading add-video-heading"><div><span className="eyebrow">LIBRARY</span><h1>{editingVideo ? "Edit video" : "Add video"}</h1><p>Videos can be linked directly or uploaded to your video storage.</p></div></div><div className="video-editor-card"><form key={editingVideo?.id ?? "new-video"} onSubmit={submitVideo}><div className="video-source-mode" role="group" aria-label="Video source"><button type="button" className={videoInputMode === "upload" ? "active" : ""} aria-pressed={videoInputMode === "upload"} disabled={videoSubmitInProgress} onClick={() => { setVideoInputMode("upload"); setVideoUploadError(""); }}>Upload video</button><button type="button" className={videoInputMode === "url" ? "active" : ""} aria-pressed={videoInputMode === "url"} disabled={videoSubmitInProgress} onClick={() => { setVideoInputMode("url"); setVideoUploadError(""); }}>Add URL</button><button type="button" className={videoInputMode === "bulk" ? "active" : ""} aria-pressed={videoInputMode === "bulk"} disabled={videoSubmitInProgress} onClick={() => { setVideoInputMode("bulk"); setVideoUploadError(""); }}>Bulk upload</button></div>{videoInputMode === "url" ? <label>VIDEO URL<input name="video_url" type="url" required placeholder="https://cdn.example.com/video.mp4" value={videoUrlInput} onChange={(event) => setVideoUrlInput(event.target.value)}/><small>External HTTPS URL. Video playback uses this source directly.</small></label> : videoInputMode === "upload" ? <div className="video-upload-field"><label htmlFor="video-file">VIDEO FILE</label><input id="video-file" type="file" accept="video/mp4,video/webm,.mp4,.webm" disabled={videoSubmitInProgress} onChange={(event) => { const file = event.currentTarget.files?.[0] ?? null; setSelectedVideoFile(file); setStagedUploadedVideoUrl(""); setVideoUploadProgress(null); setVideoUploadError(""); }}/><small>MP4 or WebM, up to 10 GB. Uploads go directly to the separate video bucket, not through Vercel.</small>{selectedVideoFile && <p className="video-upload-file-summary">{selectedVideoFile.name} · {(selectedVideoFile.size / (1024 * 1024)).toFixed(1)} MB</p>}{videoUploadProgress !== null && <div className="video-upload-progress" role="status"><span>{videoUploadProgress < 100 ? `Uploading video… ${videoUploadProgress}%` : "Upload complete. Saving video details…"}</span><progress max="100" value={videoUploadProgress}/></div>}{videoUploadError && <p className="field-error" role="alert">{videoUploadError}</p>}</div> : <section className="bulk-upload-field"><label htmlFor="bulk-video-files">VIDEO FILES</label><input id="bulk-video-files" type="file" accept="video/mp4,video/webm,.mp4,.webm" multiple disabled={videoSubmitInProgress} onChange={(event) => { const files = Array.from(event.currentTarget.files ?? []).slice(0, 50); setBulkUploadItems(files.map((file) => ({ id: crypto.randomUUID(), file, title: titleFromVideoFilename(file.name), progress: 0, status: "queued" as const }))); setVideoUploadError(files.length > 50 ? "Only the first 50 selected files were added to this batch." : ""); event.currentTarget.value = ""; }}/><small>Select up to 50 MP4 or WebM files. Each file gets a cleaned filename title, its own progress, and is saved automatically after upload. Files upload directly to video storage.</small>{bulkUploadItems.length > 0 && <div className="bulk-upload-list">{bulkUploadItems.map((item) => <div className={`bulk-upload-item ${item.status}`} key={item.id}><div className="bulk-upload-item-heading"><strong>{item.title || "Untitled video"}</strong><span>{item.status === "queued" ? "Waiting" : item.status === "uploading" ? `Uploading ${item.progress}%` : item.status === "saving" ? "Saving…" : item.status === "saved" ? "Saved" : "Failed"}</span></div><small>{item.file.name}</small>{item.status === "uploading" && <progress max="100" value={item.progress}/>}{item.error && <p className="field-error" role="alert">{item.error}</p>}</div>)}</div>}{videoUploadError && <p className="field-error" role="alert">{videoUploadError}</p>}</section>}<label className={videoInputMode === "bulk" ? "bulk-hidden-field" : ""}>TITLE<input name="title" required={videoInputMode !== "bulk"} disabled={videoInputMode === "bulk"} maxLength={180} defaultValue={editingVideo?.title}/></label><div className="category-field"><label htmlFor="video-category">CATEGORY</label><div className="category-control-row"><select id="video-category" name="category_id" required value={selectedCategoryId} onChange={(event) => setSelectedCategoryId(event.target.value)} disabled={categoryOptionsHook.loading || (Boolean(categoryOptionsHook.error) && categoryOptionsHook.categories.length === 0)}><option value="" disabled>{categoryOptionsHook.loading ? "Loading categories..." : categoryOptionsHook.error ? "Categories unavailable" : categoryOptionsHook.categories.length ? "Select category" : "No categories yet — Create category"}</option>{categoryOptionsHook.categories.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}</select><button className="create-category-inline" type="button" onClick={() => openCategory(undefined, true)}><Plus size={14}/> Create category</button></div>{categoryOptionsHook.error && <p className="field-error" role="alert">Could not load categories: {categoryOptionsHook.error} <button type="button" onClick={() => void categoryOptionsHook.refresh()}>Retry</button></p>}{!categoryOptionsHook.error && !categoryOptionsHook.loading && categoryOptionsHook.categories.length === 0 && <p className="field-empty">No categories yet — Create category</p>}</div><label>DESCRIPTION<textarea name="description" rows={3} defaultValue={editingVideo?.description}/></label><label className={videoInputMode === "bulk" ? "bulk-hidden-field" : ""}>THUMBNAIL URL<input name="thumbnail_url" type="url" placeholder="https://..." defaultValue={editingVideo?.thumbnail_url ?? ""}/><small>Optional — leave empty to automatically generate a thumbnail from the video.</small></label><label>TAGS<input name="tags" placeholder="documentary, travel" defaultValue={editingVideo?.tags.join(", ")}/></label><label className={videoInputMode === "bulk" ? "bulk-hidden-field" : ""}>DURATION<input name="duration" placeholder="12:34" defaultValue={editingVideo?.duration}/></label><div className="check-row"><label><input type="checkbox" name="featured" defaultChecked={editingVideo?.featured}/> Featured</label><label><input type="checkbox" name="published" defaultChecked={editingVideo?.published ?? true}/> Published</label></div><div className="video-form-actions"><button className="button-primary submit-button" type="submit" disabled={videoSubmitInProgress}>{videoSubmitInProgress ? (videoInputMode === "bulk" ? "Uploading batch…" : videoUploadProgress !== null && videoUploadProgress < 100 ? `Uploading… ${videoUploadProgress}%` : "Saving…") : videoInputMode === "bulk" ? "Upload and save videos" : editingVideo ? "Save changes" : "Add video"}</button><button className="cancel-video-button" type="button" onClick={() => { setEditingVideo(null); setSection("Videos"); }}>Cancel</button></div></form></div></>}
       {section === "Categories" && <><div className="admin-heading"><div><span className="eyebrow">ORGANIZE</span><h1>Categories</h1><p>Create and manage library categories.</p></div><button className="button-primary" onClick={() => openCategory()}><Plus size={15}/> Add category</button></div><div className="category-admin-list">{categoriesHook.categories.map((category) => <div className="category-admin-row" key={category.id}><div><strong>{category.name}</strong><span>{category.description || "No description"}</span></div><span>{category.video_count ?? 0} videos</span><button onClick={() => openCategory(category)}>Edit</button><button aria-label={`Delete ${category.name}`} onClick={() => deleteCategory(category)}><Trash2 size={15}/></button></div>)}{categoriesHook.categories.length === 0 && <p className="admin-empty">No categories yet. Create one to organize videos.</p>}</div></>}
        {section === "Settings" && <><div className="admin-heading"><div><span className="eyebrow">ACCOUNT</span><h1>Settings</h1><p>Manage your admin session.</p></div></div><div className="settings-panel"><ShieldCheck size={18}/><div><strong>Authenticator app MFA</strong><span>A verified TOTP factor and AAL2 session are required for admin access.</span></div><button onClick={logout}>Sign out</button></div><p className="admin-note">Video files are never uploaded. Playback streams directly from each external URL.</p></>}
     </section>

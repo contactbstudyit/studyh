@@ -23,8 +23,8 @@ function getVideoUploadContentType(file: File): "video/mp4" | "video/webm" | nul
 type VideoCheckStatus = "working" | "recovered" | "temporary" | "broken" | "unpublished" | "skipped";
 type VideoCheckResult = { videoId: string; title: string; status: VideoCheckStatus; reason: string; action: string };
 type VideoCheckSummary = { checked: number; working: number; recovered: number; temporary: number; unpublished: number; skipped: number };
-type BulkUploadItem = { id: string; file: File; title: string; progress: number; status: "queued" | "uploading" | "saving" | "saved" | "failed"; error?: string; uploadedUrl?: string; storageAccountId?: string; bucketName?: string };
-type StagedVideoUpload = { publicUrl: string; storageAccountId: string; bucketName: string };
+type BulkUploadItem = { id: string; file: File; title: string; progress: number; status: "queued" | "uploading" | "saving" | "saved" | "failed"; error?: string; uploadedUrl?: string; storageAccountSlot?: string; bucketName?: string };
+type StagedVideoUpload = { publicUrl: string; storageAccountSlot: string; bucketName: string };
 type CloudflareVideoAccount = { id: string; name: string; accountId: string; endpoint: string; bucketName: string; publicUrl: string; isDefault: boolean; isActive: boolean };
 
 function titleFromVideoFilename(filename: string) {
@@ -39,17 +39,17 @@ function titleFromVideoFilename(filename: string) {
     .slice(0, 180);
 }
 
-async function uploadVideoFileDirectly(file: File, storageAccountId: string, onProgress: (percentage: number) => void) {
+async function uploadVideoFileDirectly(file: File, storageAccountSlot: string, onProgress: (percentage: number) => void) {
   const contentType = getVideoUploadContentType(file);
   if (!contentType) throw new Error("Choose an MP4 or WebM file with a matching file extension.");
   if (file.size <= 0 || file.size > MAX_DIRECT_VIDEO_UPLOAD_BYTES) throw new Error("Video files must be between 1 byte and 10 GB.");
   const targetResponse = await fetch("/api/admin/videos/upload-target", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ filename: file.name, contentType, size: file.size, storageAccountId }),
+    body: JSON.stringify({ filename: file.name, contentType, size: file.size, storageAccountSlot }),
   });
-  const target = await targetResponse.json() as { uploadUrl?: string; publicUrl?: string; contentType?: string; storageAccountId?: string; bucketName?: string; error?: string };
-  if (!targetResponse.ok || !target.uploadUrl || !target.publicUrl || !target.storageAccountId || !target.bucketName || target.contentType !== contentType) throw new Error(target.error || "Could not prepare the secure video upload.");
+  const target = await targetResponse.json() as { uploadUrl?: string; publicUrl?: string; contentType?: string; storageAccountSlot?: string; bucketName?: string; error?: string };
+  if (!targetResponse.ok || !target.uploadUrl || !target.publicUrl || !target.storageAccountSlot || !target.bucketName || target.contentType !== contentType) throw new Error(target.error || "Could not prepare the secure video upload.");
   await new Promise<void>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("PUT", target.uploadUrl!);
@@ -64,7 +64,7 @@ async function uploadVideoFileDirectly(file: File, storageAccountId: string, onP
     xhr.send(file);
   });
   onProgress(100);
-  return { publicUrl: target.publicUrl, storageAccountId: target.storageAccountId, bucketName: target.bucketName };
+  return { publicUrl: target.publicUrl, storageAccountSlot: target.storageAccountSlot, bucketName: target.bucketName };
 }
 
 export default function AdminDashboard() {
@@ -92,9 +92,6 @@ export default function AdminDashboard() {
   const [cloudflareAccountsLoading, setCloudflareAccountsLoading] = useState(false);
   const [cloudflareAccountsError, setCloudflareAccountsError] = useState("");
   const [selectedCloudflareAccountId, setSelectedCloudflareAccountId] = useState("");
-  const [cloudflareAccountManagerOpen, setCloudflareAccountManagerOpen] = useState(false);
-  const [cloudflareAccountBusy, setCloudflareAccountBusy] = useState(false);
-  const [cloudflareAccountFormError, setCloudflareAccountFormError] = useState("");
   const videoSubmitLock = useRef(false);
   const [generatingThumbnailIds, setGeneratingThumbnailIds] = useState<Set<string>>(() => new Set());
   const [thumbnailBatchRunning, setThumbnailBatchRunning] = useState(false);
@@ -143,8 +140,8 @@ export default function AdminDashboard() {
   }, []);
 
   useEffect(() => {
-    if (section === "Add Video" || cloudflareAccountManagerOpen) void refreshCloudflareVideoAccounts();
-  }, [cloudflareAccountManagerOpen, refreshCloudflareVideoAccounts, section]);
+    if (section === "Add Video") void refreshCloudflareVideoAccounts();
+  }, [refreshCloudflareVideoAccounts, section]);
 
   function updateBulkUploadItems(update: (items: BulkUploadItem[]) => BulkUploadItem[]) {
     const next = update(bulkUploadItemsRef.current);
@@ -279,7 +276,7 @@ export default function AdminDashboard() {
   function openVideo(video?: VideoRecord) {
     setEditingVideo(video ?? null);
     setSelectedCategoryId(video?.category_id ?? "");
-    const associatedAccount = video?.cloudflare_video_account_id;
+    const associatedAccount = video?.cloudflare_video_account_slot;
     if (associatedAccount) setSelectedCloudflareAccountId(associatedAccount);
     setVideoInputMode("url");
     setVideoUrlInput(video?.video_url ?? "");
@@ -294,77 +291,6 @@ export default function AdminDashboard() {
     void categoryOptionsHook.refresh();
   }
   function openCategory(category?: Category, quick = false) { setEditingCategory(category ?? null); setQuickCategory(quick); setCategoryFormError(""); setCategoryDialog(true); }
-
-  async function createCloudflareVideoAccount(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (cloudflareAccountBusy) return;
-    const formElement = event.currentTarget;
-    const form = new FormData(formElement);
-    setCloudflareAccountBusy(true);
-    setCloudflareAccountFormError("");
-    try {
-      const response = await fetch("/api/admin/cloudflare-video-accounts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: String(form.get("name") ?? ""),
-          accountId: String(form.get("account_id") ?? ""),
-          accessKeyId: String(form.get("access_key_id") ?? ""),
-          secretAccessKey: String(form.get("secret_access_key") ?? ""),
-          bucketName: String(form.get("bucket_name") ?? ""),
-          publicUrl: String(form.get("public_url") ?? ""),
-          isDefault: form.get("is_default") === "on",
-        }),
-      });
-      const result = await response.json() as { account?: CloudflareVideoAccount; error?: string };
-      if (!response.ok || !result.account) throw new Error(result.error || "Could not add Cloudflare video account");
-      formElement.reset();
-      await refreshCloudflareVideoAccounts();
-      setSelectedCloudflareAccountId(result.account.id);
-      toast.success(`${result.account.name} (${result.account.bucketName}) added to video storage.`);
-    } catch (error) {
-      setCloudflareAccountFormError(error instanceof Error ? error.message : "Could not add Cloudflare video account.");
-    } finally {
-      setCloudflareAccountBusy(false);
-    }
-  }
-
-  async function updateCloudflareVideoAccount(account: CloudflareVideoAccount, action: "default" | "active", isActive?: boolean) {
-    if (cloudflareAccountBusy) return;
-    setCloudflareAccountBusy(true);
-    try {
-      const response = await fetch("/api/admin/cloudflare-video-accounts", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: account.id, action, ...(action === "active" ? { isActive } : {}) }),
-      });
-      const result = await response.json() as { account?: CloudflareVideoAccount; error?: string };
-      if (!response.ok || !result.account) throw new Error(result.error || "Could not update Cloudflare account");
-      await refreshCloudflareVideoAccounts();
-      if (action === "default") setSelectedCloudflareAccountId(account.id);
-      toast.success(action === "default" ? `${account.name} is now the default video account.` : `${account.name} ${isActive ? "activated" : "deactivated"}.`);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not update Cloudflare account.");
-    } finally {
-      setCloudflareAccountBusy(false);
-    }
-  }
-
-  async function deleteCloudflareVideoAccount(account: CloudflareVideoAccount) {
-    if (cloudflareAccountBusy || !window.confirm(`Remove ${account.name} (${account.bucketName}) from the account selector? Stored videos and bucket objects are retained.`)) return;
-    setCloudflareAccountBusy(true);
-    try {
-      const response = await fetch(`/api/admin/cloudflare-video-accounts?id=${encodeURIComponent(account.id)}`, { method: "DELETE" });
-      const result = await response.json() as { error?: string };
-      if (!response.ok) throw new Error(result.error || "Could not remove Cloudflare account");
-      await refreshCloudflareVideoAccounts();
-      toast.success(`${account.name} removed from the video account selector.`);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not remove Cloudflare account.");
-    } finally {
-      setCloudflareAccountBusy(false);
-    }
-  }
 
   async function submitVideo(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); const form = new FormData(event.currentTarget);
@@ -400,10 +326,10 @@ export default function AdminDashboard() {
         const targetResponse = await fetch("/api/admin/videos/upload-target", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ filename: selectedVideoFile.name, contentType: uploadContentType, size: selectedVideoFile.size, storageAccountId: selectedCloudflareAccountId }),
+          body: JSON.stringify({ filename: selectedVideoFile.name, contentType: uploadContentType, size: selectedVideoFile.size, storageAccountSlot: selectedCloudflareAccountId }),
         });
-        const target = await targetResponse.json() as { uploadUrl?: string; publicUrl?: string; contentType?: string; storageAccountId?: string; bucketName?: string; error?: string };
-        if (!targetResponse.ok || !target.uploadUrl || !target.publicUrl || !target.storageAccountId || !target.bucketName || target.contentType !== uploadContentType) throw new Error(target.error || "Could not prepare the secure video upload.");
+        const target = await targetResponse.json() as { uploadUrl?: string; publicUrl?: string; contentType?: string; storageAccountSlot?: string; bucketName?: string; error?: string };
+        if (!targetResponse.ok || !target.uploadUrl || !target.publicUrl || !target.storageAccountSlot || !target.bucketName || target.contentType !== uploadContentType) throw new Error(target.error || "Could not prepare the secure video upload.");
         await new Promise<void>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           xhr.open("PUT", target.uploadUrl!);
@@ -419,12 +345,12 @@ export default function AdminDashboard() {
           xhr.onabort = () => reject(new Error("Video upload was cancelled."));
           xhr.send(selectedVideoFile);
         });
-        uploadedStorage = { publicUrl: target.publicUrl, storageAccountId: target.storageAccountId, bucketName: target.bucketName };
+        uploadedStorage = { publicUrl: target.publicUrl, storageAccountSlot: target.storageAccountSlot, bucketName: target.bucketName };
         setStagedUploadedVideo(uploadedStorage);
         url = target.publicUrl;
         setVideoUploadProgress(100);
       }
-      const data = { ...videoMetadata, video_url: url, cloudflare_video_account_id: videoInputMode === "upload" ? uploadedStorage?.storageAccountId ?? null : null, cloudflare_video_bucket_name: videoInputMode === "upload" ? uploadedStorage?.bucketName ?? null : null };
+      const data = { ...videoMetadata, video_url: url, cloudflare_video_account_slot: videoInputMode === "upload" ? uploadedStorage?.storageAccountSlot ?? null : null, cloudflare_video_bucket_name: videoInputMode === "upload" ? uploadedStorage?.bucketName ?? null : null };
       if (editingVideo) {
         const updated = await videosHook.update(editingVideo.id, data);
         if (updated) savedVideo = { ...editingVideo, ...data, updated_at: new Date().toISOString() };
@@ -492,19 +418,19 @@ export default function AdminDashboard() {
         updateBulkUploadItems((current) => current.map((item) => item.id === batchItem.id ? { ...item, status: "uploading", error: undefined, progress: item.uploadedUrl ? 100 : 0 } : item));
         try {
           let publicUrl = batchItem.uploadedUrl;
-          let storageAccountId = batchItem.storageAccountId;
+          let storageAccountSlot = batchItem.storageAccountSlot;
           let bucketName = batchItem.bucketName;
           if (!publicUrl) {
             const uploaded = await uploadVideoFileDirectly(batchItem.file, selectedAccount.id, (progress) => {
               updateBulkUploadItems((current) => current.map((item) => item.id === batchItem.id ? { ...item, progress } : item));
             });
             publicUrl = uploaded.publicUrl;
-            storageAccountId = uploaded.storageAccountId;
+            storageAccountSlot = uploaded.storageAccountSlot;
             bucketName = uploaded.bucketName;
-            updateBulkUploadItems((current) => current.map((item) => item.id === batchItem.id ? { ...item, uploadedUrl: publicUrl, storageAccountId, bucketName, progress: 100 } : item));
+            updateBulkUploadItems((current) => current.map((item) => item.id === batchItem.id ? { ...item, uploadedUrl: publicUrl, storageAccountSlot, bucketName, progress: 100 } : item));
           }
           updateBulkUploadItems((current) => current.map((item) => item.id === batchItem.id ? { ...item, status: "saving" } : item));
-          const saved = await videosHook.create({ ...sharedFields, title: batchItem.title, video_url: publicUrl!, thumbnail_url: null, cloudflare_video_account_id: storageAccountId ?? selectedAccount.id, cloudflare_video_bucket_name: bucketName ?? selectedAccount.bucketName });
+          const saved = await videosHook.create({ ...sharedFields, title: batchItem.title, video_url: publicUrl!, thumbnail_url: null, cloudflare_video_account_slot: storageAccountSlot ?? selectedAccount.id, cloudflare_video_bucket_name: bucketName ?? selectedAccount.bucketName });
           if (!saved) throw new Error("Upload finished, but the video record could not be saved. Retry to save it without uploading the file again.");
           updateBulkUploadItems((current) => current.map((item) => item.id === batchItem.id ? { ...item, status: "saved", progress: 100, error: undefined } : item));
           succeeded++;
@@ -888,7 +814,7 @@ export default function AdminDashboard() {
            {videoCheckResults.length > 0 && <div className="video-check-table-wrap"><table className="video-check-table"><thead><tr><th>Video</th><th>Status</th><th>Reason</th><th>Action</th></tr></thead><tbody>{videoCheckResults.map((result) => <tr key={result.videoId}><td>{result.title}</td><td>{videoCheckStatusLabel(result.status, result.action)}</td><td>{result.reason}</td><td>{result.action}</td></tr>)}</tbody></table></div>}
          </section>}
        </>}
-      {section === "Add Video" && <><div className="admin-heading add-video-heading"><div><span className="eyebrow">LIBRARY</span><h1>{editingVideo ? "Edit video" : "Add video"}</h1><p>Videos can be linked directly or uploaded to your video storage.</p></div></div><div className="video-editor-card"><form key={editingVideo?.id ?? "new-video"} onSubmit={submitVideo}>{videoInputMode !== "url" && <div className="cloudflare-video-account-picker"><label htmlFor="video-storage-account">CLOUDFLARE VIDEO ACCOUNT</label><div className="cloudflare-video-account-controls"><select id="video-storage-account" value={selectedCloudflareAccountId} onChange={(event) => setSelectedCloudflareAccountId(event.target.value)} disabled={videoSubmitInProgress || cloudflareAccountsLoading}><option value="">{cloudflareAccountsLoading ? "Loading accounts…" : "Select storage account"}</option>{cloudflareVideoAccounts.filter((account) => account.isActive).map((account) => <option key={account.id} value={account.id}>{account.name} — {account.bucketName}{account.isDefault ? " (default)" : ""}</option>)}</select><button className="secondary-action" type="button" onClick={() => { setCloudflareAccountFormError(""); setCloudflareAccountManagerOpen(true); }} disabled={videoSubmitInProgress}>Manage accounts</button></div>{cloudflareVideoAccounts.filter((account) => account.isActive).length === 0 && !cloudflareAccountsLoading && <small>Add a Cloudflare R2 video account to enable direct uploads. Credentials are encrypted on the server.</small>}{cloudflareAccountsError && <p className="field-error" role="alert">{cloudflareAccountsError}</p>}</div>}<div className="video-source-mode" role="group" aria-label="Video source"><button type="button" className={videoInputMode === "upload" ? "active" : ""} aria-pressed={videoInputMode === "upload"} disabled={videoSubmitInProgress} onClick={() => { setVideoInputMode("upload"); setVideoUploadError(""); }}>Upload video</button><button type="button" className={videoInputMode === "url" ? "active" : ""} aria-pressed={videoInputMode === "url"} disabled={videoSubmitInProgress} onClick={() => { setVideoInputMode("url"); setVideoUploadError(""); }}>Add URL</button><button type="button" className={videoInputMode === "bulk" ? "active" : ""} aria-pressed={videoInputMode === "bulk"} disabled={videoSubmitInProgress} onClick={() => { setVideoInputMode("bulk"); setVideoUploadError(""); }}>Bulk upload</button></div>{videoInputMode === "url" ? <label>VIDEO URL<input name="video_url" type="url" required placeholder="https://cdn.example.com/video.mp4" value={videoUrlInput} onChange={(event) => setVideoUrlInput(event.target.value)}/><small>External HTTPS URL. Video playback uses this source directly.</small></label> : videoInputMode === "upload" ? <div className="video-upload-field"><label htmlFor="video-file">VIDEO FILE</label><input id="video-file" type="file" accept="video/mp4,video/webm,.mp4,.webm" disabled={videoSubmitInProgress} onChange={(event) => { const file = event.currentTarget.files?.[0] ?? null; setSelectedVideoFile(file); setStagedUploadedVideo(null); setVideoUploadProgress(null); setVideoUploadError(""); }}/><small>MP4 or WebM, up to 10 GB. Uploads go directly to the separate video bucket, not through Vercel.</small>{selectedVideoFile && <p className="video-upload-file-summary">{selectedVideoFile.name} · {(selectedVideoFile.size / (1024 * 1024)).toFixed(1)} MB</p>}{videoUploadProgress !== null && <div className="video-upload-progress" role="status"><span>{videoUploadProgress < 100 ? `Uploading video… ${videoUploadProgress}%` : "Upload complete. Saving video details…"}</span><progress max="100" value={videoUploadProgress}/></div>}{videoUploadError && <p className="field-error" role="alert">{videoUploadError}</p>}</div> : <section className="bulk-upload-field"><label htmlFor="bulk-video-files">VIDEO FILES</label><input id="bulk-video-files" type="file" accept="video/mp4,video/webm,.mp4,.webm" multiple disabled={videoSubmitInProgress} onChange={(event) => { const files = Array.from(event.currentTarget.files ?? []).slice(0, 50); (() => { const items = files.map((file) => ({ id: crypto.randomUUID(), file, title: titleFromVideoFilename(file.name), progress: 0, status: "queued" as const })); bulkUploadItemsRef.current = items; setBulkUploadItems(items); })(); setVideoUploadError(files.length > 50 ? "Only the first 50 selected files were added to this batch." : ""); event.currentTarget.value = ""; }}/><small>Select up to 50 MP4 or WebM files. Each file gets a cleaned filename title, its own progress, and is saved automatically after upload. Files upload directly to video storage.</small>{bulkUploadItems.length > 0 && <div className="bulk-upload-list">{bulkUploadItems.map((item) => <div className={`bulk-upload-item ${item.status}`} key={item.id}><div className="bulk-upload-item-heading"><strong>{item.title || "Untitled video"}</strong><span>{item.status === "queued" ? "Waiting" : item.status === "uploading" ? `Uploading ${item.progress}%` : item.status === "saving" ? "Saving…" : item.status === "saved" ? "Saved" : "Failed"}</span></div><small>{item.file.name}</small>{item.status === "uploading" && <progress max="100" value={item.progress}/>}{item.error && <p className="field-error" role="alert">{item.error}</p>}</div>)}</div>}{videoUploadError && <p className="field-error" role="alert">{videoUploadError}</p>}</section>}<label className={videoInputMode === "bulk" ? "bulk-hidden-field" : ""}>TITLE<input name="title" required={videoInputMode !== "bulk"} disabled={videoInputMode === "bulk"} maxLength={180} defaultValue={editingVideo?.title}/></label><div className="category-field"><label htmlFor="video-category">CATEGORY</label><div className="category-control-row"><select id="video-category" name="category_id" required value={selectedCategoryId} onChange={(event) => setSelectedCategoryId(event.target.value)} disabled={categoryOptionsHook.loading || (Boolean(categoryOptionsHook.error) && categoryOptionsHook.categories.length === 0)}><option value="" disabled>{categoryOptionsHook.loading ? "Loading categories..." : categoryOptionsHook.error ? "Categories unavailable" : categoryOptionsHook.categories.length ? "Select category" : "No categories yet — Create category"}</option>{categoryOptionsHook.categories.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}</select><button className="create-category-inline" type="button" onClick={() => openCategory(undefined, true)}><Plus size={14}/> Create category</button></div>{categoryOptionsHook.error && <p className="field-error" role="alert">Could not load categories: {categoryOptionsHook.error} <button type="button" onClick={() => void categoryOptionsHook.refresh()}>Retry</button></p>}{!categoryOptionsHook.error && !categoryOptionsHook.loading && categoryOptionsHook.categories.length === 0 && <p className="field-empty">No categories yet — Create category</p>}</div><label>DESCRIPTION<textarea name="description" rows={3} defaultValue={editingVideo?.description}/></label><label className={videoInputMode === "bulk" ? "bulk-hidden-field" : ""}>THUMBNAIL URL<input name="thumbnail_url" type="url" placeholder="https://..." defaultValue={editingVideo?.thumbnail_url ?? ""}/><small>Optional — leave empty to automatically generate a thumbnail from the video.</small></label><label>TAGS<input name="tags" placeholder="documentary, travel" defaultValue={editingVideo?.tags.join(", ")}/></label><label className={videoInputMode === "bulk" ? "bulk-hidden-field" : ""}>DURATION<input name="duration" placeholder="12:34" defaultValue={editingVideo?.duration}/></label><div className="check-row"><label><input type="checkbox" name="featured" defaultChecked={editingVideo?.featured}/> Featured</label><label><input type="checkbox" name="published" defaultChecked={editingVideo?.published ?? true}/> Published</label></div><div className="video-form-actions"><button className="button-primary submit-button" type="submit" disabled={videoSubmitInProgress}>{videoSubmitInProgress ? (videoInputMode === "bulk" ? "Uploading batch…" : videoUploadProgress !== null && videoUploadProgress < 100 ? `Uploading… ${videoUploadProgress}%` : "Saving…") : videoInputMode === "bulk" ? "Upload and save videos" : editingVideo ? "Save changes" : "Add video"}</button><button className="cancel-video-button" type="button" onClick={() => { setEditingVideo(null); setSection("Videos"); }}>Cancel</button></div></form></div></>}
+      {section === "Add Video" && <><div className="admin-heading add-video-heading"><div><span className="eyebrow">LIBRARY</span><h1>{editingVideo ? "Edit video" : "Add video"}</h1><p>Videos can be linked directly or uploaded to your video storage.</p></div></div><div className="video-editor-card"><form key={editingVideo?.id ?? "new-video"} onSubmit={submitVideo}>{videoInputMode !== "url" && <div className="cloudflare-video-account-picker"><label htmlFor="video-storage-account">CLOUDFLARE VIDEO ACCOUNT</label><div className="cloudflare-video-account-controls"><select id="video-storage-account" value={selectedCloudflareAccountId} onChange={(event) => setSelectedCloudflareAccountId(event.target.value)} disabled={videoSubmitInProgress || cloudflareAccountsLoading}><option value="">{cloudflareAccountsLoading ? "Loading accounts…" : "Select account slot"}</option>{cloudflareVideoAccounts.map((account) => <option key={account.id} value={account.id}>{account.name} — {account.bucketName}{account.isDefault ? " (default)" : ""}</option>)}</select></div>{cloudflareVideoAccounts.filter((account) => account.isActive).length === 0 && !cloudflareAccountsLoading && <small>Account slots are loaded from server secrets. Configure accounts 1, 2, or 3 in deployment secrets; the configured default slot is preselected.</small>}{cloudflareAccountsError && <p className="field-error" role="alert">{cloudflareAccountsError}</p>}</div>}<div className="video-source-mode" role="group" aria-label="Video source"><button type="button" className={videoInputMode === "upload" ? "active" : ""} aria-pressed={videoInputMode === "upload"} disabled={videoSubmitInProgress} onClick={() => { setVideoInputMode("upload"); setVideoUploadError(""); }}>Upload video</button><button type="button" className={videoInputMode === "url" ? "active" : ""} aria-pressed={videoInputMode === "url"} disabled={videoSubmitInProgress} onClick={() => { setVideoInputMode("url"); setVideoUploadError(""); }}>Add URL</button><button type="button" className={videoInputMode === "bulk" ? "active" : ""} aria-pressed={videoInputMode === "bulk"} disabled={videoSubmitInProgress} onClick={() => { setVideoInputMode("bulk"); setVideoUploadError(""); }}>Bulk upload</button></div>{videoInputMode === "url" ? <label>VIDEO URL<input name="video_url" type="url" required placeholder="https://cdn.example.com/video.mp4" value={videoUrlInput} onChange={(event) => setVideoUrlInput(event.target.value)}/><small>External HTTPS URL. Video playback uses this source directly.</small></label> : videoInputMode === "upload" ? <div className="video-upload-field"><label htmlFor="video-file">VIDEO FILE</label><input id="video-file" type="file" accept="video/mp4,video/webm,.mp4,.webm" disabled={videoSubmitInProgress} onChange={(event) => { const file = event.currentTarget.files?.[0] ?? null; setSelectedVideoFile(file); setStagedUploadedVideo(null); setVideoUploadProgress(null); setVideoUploadError(""); }}/><small>MP4 or WebM, up to 10 GB. Uploads go directly to the separate video bucket, not through Vercel.</small>{selectedVideoFile && <p className="video-upload-file-summary">{selectedVideoFile.name} · {(selectedVideoFile.size / (1024 * 1024)).toFixed(1)} MB</p>}{videoUploadProgress !== null && <div className="video-upload-progress" role="status"><span>{videoUploadProgress < 100 ? `Uploading video… ${videoUploadProgress}%` : "Upload complete. Saving video details…"}</span><progress max="100" value={videoUploadProgress}/></div>}{videoUploadError && <p className="field-error" role="alert">{videoUploadError}</p>}</div> : <section className="bulk-upload-field"><label htmlFor="bulk-video-files">VIDEO FILES</label><input id="bulk-video-files" type="file" accept="video/mp4,video/webm,.mp4,.webm" multiple disabled={videoSubmitInProgress} onChange={(event) => { const files = Array.from(event.currentTarget.files ?? []).slice(0, 50); (() => { const items = files.map((file) => ({ id: crypto.randomUUID(), file, title: titleFromVideoFilename(file.name), progress: 0, status: "queued" as const })); bulkUploadItemsRef.current = items; setBulkUploadItems(items); })(); setVideoUploadError(files.length > 50 ? "Only the first 50 selected files were added to this batch." : ""); event.currentTarget.value = ""; }}/><small>Select up to 50 MP4 or WebM files. Each file gets a cleaned filename title, its own progress, and is saved automatically after upload. Files upload directly to video storage.</small>{bulkUploadItems.length > 0 && <div className="bulk-upload-list">{bulkUploadItems.map((item) => <div className={`bulk-upload-item ${item.status}`} key={item.id}><div className="bulk-upload-item-heading"><strong>{item.title || "Untitled video"}</strong><span>{item.status === "queued" ? "Waiting" : item.status === "uploading" ? `Uploading ${item.progress}%` : item.status === "saving" ? "Saving…" : item.status === "saved" ? "Saved" : "Failed"}</span></div><small>{item.file.name}</small>{item.status === "uploading" && <progress max="100" value={item.progress}/>}{item.error && <p className="field-error" role="alert">{item.error}</p>}</div>)}</div>}{videoUploadError && <p className="field-error" role="alert">{videoUploadError}</p>}</section>}<label className={videoInputMode === "bulk" ? "bulk-hidden-field" : ""}>TITLE<input name="title" required={videoInputMode !== "bulk"} disabled={videoInputMode === "bulk"} maxLength={180} defaultValue={editingVideo?.title}/></label><div className="category-field"><label htmlFor="video-category">CATEGORY</label><div className="category-control-row"><select id="video-category" name="category_id" required value={selectedCategoryId} onChange={(event) => setSelectedCategoryId(event.target.value)} disabled={categoryOptionsHook.loading || (Boolean(categoryOptionsHook.error) && categoryOptionsHook.categories.length === 0)}><option value="" disabled>{categoryOptionsHook.loading ? "Loading categories..." : categoryOptionsHook.error ? "Categories unavailable" : categoryOptionsHook.categories.length ? "Select category" : "No categories yet — Create category"}</option>{categoryOptionsHook.categories.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}</select><button className="create-category-inline" type="button" onClick={() => openCategory(undefined, true)}><Plus size={14}/> Create category</button></div>{categoryOptionsHook.error && <p className="field-error" role="alert">Could not load categories: {categoryOptionsHook.error} <button type="button" onClick={() => void categoryOptionsHook.refresh()}>Retry</button></p>}{!categoryOptionsHook.error && !categoryOptionsHook.loading && categoryOptionsHook.categories.length === 0 && <p className="field-empty">No categories yet — Create category</p>}</div><label>DESCRIPTION<textarea name="description" rows={3} defaultValue={editingVideo?.description}/></label><label className={videoInputMode === "bulk" ? "bulk-hidden-field" : ""}>THUMBNAIL URL<input name="thumbnail_url" type="url" placeholder="https://..." defaultValue={editingVideo?.thumbnail_url ?? ""}/><small>Optional — leave empty to automatically generate a thumbnail from the video.</small></label><label>TAGS<input name="tags" placeholder="documentary, travel" defaultValue={editingVideo?.tags.join(", ")}/></label><label className={videoInputMode === "bulk" ? "bulk-hidden-field" : ""}>DURATION<input name="duration" placeholder="12:34" defaultValue={editingVideo?.duration}/></label><div className="check-row"><label><input type="checkbox" name="featured" defaultChecked={editingVideo?.featured}/> Featured</label><label><input type="checkbox" name="published" defaultChecked={editingVideo?.published ?? true}/> Published</label></div><div className="video-form-actions"><button className="button-primary submit-button" type="submit" disabled={videoSubmitInProgress}>{videoSubmitInProgress ? (videoInputMode === "bulk" ? "Uploading batch…" : videoUploadProgress !== null && videoUploadProgress < 100 ? `Uploading… ${videoUploadProgress}%` : "Saving…") : videoInputMode === "bulk" ? "Upload and save videos" : editingVideo ? "Save changes" : "Add video"}</button><button className="cancel-video-button" type="button" onClick={() => { setEditingVideo(null); setSection("Videos"); }}>Cancel</button></div></form></div></>}
       {section === "Categories" && <><div className="admin-heading"><div><span className="eyebrow">ORGANIZE</span><h1>Categories</h1><p>Create and manage library categories.</p></div><button className="button-primary" onClick={() => openCategory()}><Plus size={15}/> Add category</button></div><div className="category-admin-list">{categoriesHook.categories.map((category) => <div className="category-admin-row" key={category.id}><div><strong>{category.name}</strong><span>{category.description || "No description"}</span></div><span>{category.video_count ?? 0} videos</span><button onClick={() => openCategory(category)}>Edit</button><button aria-label={`Delete ${category.name}`} onClick={() => deleteCategory(category)}><Trash2 size={15}/></button></div>)}{categoriesHook.categories.length === 0 && <p className="admin-empty">No categories yet. Create one to organize videos.</p>}</div></>}
        {section === "Settings" && <><div className="admin-heading"><div><span className="eyebrow">ACCOUNT</span><h1>Settings</h1><p>Manage your admin session.</p></div></div><div className="settings-panel"><ShieldCheck size={18}/><div><strong>Authenticator app MFA</strong><span>A verified TOTP factor and AAL2 session are required for admin access.</span></div><button onClick={logout}>Sign out</button></div><p className="admin-note">Video files are never uploaded. Playback streams directly from each external URL.</p></>}
     </section>
@@ -923,26 +849,6 @@ export default function AdminDashboard() {
           <button className="cancel-video-button" type="button" onClick={() => { setBulkDeleteDialogOpen(false); setBulkDeleteCode(""); setBulkDeletePreview(null); }} disabled={bulkDeleteBusy}>Cancel</button>
           <button className="danger-action" type="button" onClick={() => void confirmDeleteAllInCategory()} disabled={bulkDeleteBusy || bulkDeleteCode.length !== 6}>{bulkDeleteBusy ? "Deleting…" : "Delete All Videos"}</button>
         </div>
-      </section>
-    </div>}
-    {cloudflareAccountManagerOpen && <div className="modal-backdrop cloudflare-account-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !cloudflareAccountBusy) setCloudflareAccountManagerOpen(false); }}>
-      <section className="add-modal cloudflare-account-dialog" role="dialog" aria-modal="true" aria-labelledby="cloudflare-account-title">
-        <div className="modal-title"><div><span className="eyebrow">VIDEO STORAGE</span><h2 id="cloudflare-account-title">Manage Cloudflare accounts</h2></div><button className="icon-button" type="button" aria-label="Close" onClick={() => setCloudflareAccountManagerOpen(false)} disabled={cloudflareAccountBusy}><X size={18}/></button></div>
-        {cloudflareAccountsLoading ? <p className="cloudflare-account-loading" role="status">Loading accounts…</p> : <div className="cloudflare-account-list">{cloudflareVideoAccounts.map((account) => <div className="cloudflare-account-row" key={account.id}><div className="cloudflare-account-details"><strong>{account.name}{account.isDefault ? " · Default" : ""}</strong><span>{account.bucketName} · {account.accountId}</span><small>{account.publicUrl}</small><small>{account.endpoint}</small>{!account.isActive && <small>Inactive</small>}</div><div className="cloudflare-account-actions">{!account.isDefault && account.isActive && <button type="button" className="secondary-action" disabled={cloudflareAccountBusy} onClick={() => void updateCloudflareVideoAccount(account, "default")}>Set default</button>}<button type="button" className="secondary-action" disabled={cloudflareAccountBusy || account.isDefault} onClick={() => void updateCloudflareVideoAccount(account, "active", !account.isActive)}>{account.isActive ? "Deactivate" : "Activate"}</button><button type="button" className="cloudflare-account-remove" disabled={cloudflareAccountBusy} onClick={() => void deleteCloudflareVideoAccount(account)}>Remove</button></div></div>)}{cloudflareVideoAccounts.length === 0 && <p className="admin-empty">No video accounts configured yet.</p>}</div>}
-        <form className="cloudflare-account-form" onSubmit={createCloudflareVideoAccount}>
-          <h3>Add an R2 video account</h3>
-          <label>ACCOUNT NAME<input name="name" required maxLength={100} placeholder="Studio videos"/></label>
-          <label>CLOUDFLARE ACCOUNT ID<input name="account_id" required pattern="[a-fA-F0-9]{32}" maxLength={32} autoComplete="off"/></label>
-          <p className="cloudflare-account-endpoint">R2 endpoint: https://&lt;account-id&gt;.r2.cloudflarestorage.com</p>
-          <label>R2 ACCESS KEY ID<input name="access_key_id" required autoComplete="new-password"/></label>
-          <label>R2 SECRET ACCESS KEY<input name="secret_access_key" type="password" required autoComplete="new-password"/></label>
-          <label>BUCKET NAME<input name="bucket_name" required minLength={3} maxLength={63}/></label>
-          <label>PUBLIC HTTPS URL<input name="public_url" type="url" required placeholder="https://videos.example.com"/></label>
-          <label className="checkbox-label"><input name="is_default" type="checkbox" disabled={cloudflareVideoAccounts.length === 0}/> Set as default account</label>
-          <p className="cloudflare-account-security-note">Access keys are encrypted before they are stored. The secret key is never sent back to the browser. Configure the bucket’s CORS policy to permit PUT from this site’s origins.</p>
-          {cloudflareAccountFormError && <p className="field-error" role="alert">{cloudflareAccountFormError}</p>}
-          <div className="category-modal-actions"><button type="button" className="cancel-video-button" disabled={cloudflareAccountBusy} onClick={() => setCloudflareAccountManagerOpen(false)}>Close</button><button type="submit" className="button-primary" disabled={cloudflareAccountBusy}>{cloudflareAccountBusy ? "Saving account…" : "Add account"}</button></div>
-        </form>
       </section>
     </div>}
   </main>;

@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 
 export type Category = { id: string; name: string; description: string; image_url: string | null; created_at: string; updated_at: string; video_count?: number };
 export type CategoryOption = Pick<Category, "id" | "name">;
-export type VideoRecord = { id: string; title: string; video_url: string; cloudflare_video_account_id?: string | null; cloudflare_video_bucket_name?: string | null; description: string; thumbnail_url: string | null; category_id: string; tags: string[]; duration: string; views: number; display_view_count: number; display_views?: number; published_at: string | null; featured: boolean; published: boolean; created_at: string; updated_at: string; categories?: { name: string } | null };
+export type VideoRecord = { id: string; title: string; video_url: string; cloudflare_video_account_slot?: string | null; cloudflare_video_bucket_name?: string | null; description: string; thumbnail_url: string | null; category_id: string; tags: string[]; duration: string; views: number; display_view_count: number; display_views?: number; published_at: string | null; featured: boolean; published: boolean; created_at: string; updated_at: string; categories?: { name: string } | null };
 export type LibraryStats = { total_videos: number; published_videos: number; total_categories: number; total_views: number };
 export type LibraryStatsDiagnostic = { phase: "Supabase RPC call" | "admin authorization check" | "response parsing/type conversion"; message: string; code: string | null; details: string | null; hint: string | null };
 export type VideoSort = "latest" | "oldest" | "most-watched" | "least-watched" | "a-z" | "z-a" | "random" | "most-liked" | "highest-rated" | "lowest-rated";

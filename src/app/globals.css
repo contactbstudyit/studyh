@@ -241,24 +241,7 @@ body { background: #000; color: #fff; font-family: var(--font-geist-sans), syste
 .cloudflare-video-account-controls select { flex: 1; min-width: 0; min-height: 42px; }
 .cloudflare-video-account-controls .secondary-action { min-height: 42px; white-space: nowrap; }
 .cloudflare-video-account-picker > small { color: #85827a; font-size: 10px; line-height: 1.5; }
-.cloudflare-account-dialog { width: min(620px,calc(100vw - 32px)); max-height: min(88dvh,780px); overflow: auto; }
-.cloudflare-account-dialog .modal-title { position: sticky; top: -24px; z-index: 2; margin: -24px -24px 14px; padding: 20px 24px 14px; background: #10100f; border-bottom: 1px solid var(--line); }
-.cloudflare-account-dialog .modal-title h2 { margin: 7px 0 0; font-size: 21px; font-weight: 500; }
-.cloudflare-account-list { display: grid; gap: 8px; margin-bottom: 22px; }
-.cloudflare-account-row { display: flex; justify-content: space-between; gap: 12px; padding: 12px; border: 1px solid var(--line); background: #0c0c0b; }
-.cloudflare-account-details { display: grid; min-width: 0; gap: 4px; }
-.cloudflare-account-details strong { color: #e7e3da; font-size: 12px; font-weight: 500; }
-.cloudflare-account-details span,.cloudflare-account-details small { color: #8d8a82; font-size: 9px; overflow-wrap: anywhere; }
-.cloudflare-account-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-content: start; gap: 5px; }
-.cloudflare-account-actions button { min-height: 30px; padding: 0 8px; font-size: 9px; }
-.cloudflare-account-remove { border: 1px solid rgba(184,95,85,.4); background: transparent; color: #d2a49e; }
-.cloudflare-account-form { display: grid; gap: 11px; padding-top: 17px; border-top: 1px solid var(--line); }
-.cloudflare-account-form h3 { margin: 0 0 3px; color: #dedbd3; font-size: 13px; font-weight: 500; }
-.cloudflare-account-form input:not([type=checkbox]) { width: 100%; min-height: 40px; margin-top: 5px; padding: 9px 10px; border: 1px solid var(--line); background: #090908; color: #eeeae1; font-size: 13px; }
-.cloudflare-account-form label { color: #a9a69e; font-size: 9px; letter-spacing: .8px; }
-.cloudflare-account-endpoint,.cloudflare-account-security-note { margin: 0; color: #817e76; font-size: 9px; line-height: 1.55; overflow-wrap: anywhere; }
-.cloudflare-account-form .category-modal-actions { margin-top: 5px; }
-@media (max-width: 560px) { .cloudflare-account-row { display: grid; }.cloudflare-account-actions { justify-content: flex-start; }.cloudflare-video-account-controls { flex-direction: column; } }
+@media (max-width: 560px) { .cloudflare-video-account-controls { flex-direction: column; } }
 .thumbnail-error-detail { color: #a29a91; }
 .video-header-actions { display: flex; align-items: center; gap: 8px; }
 .secondary-action { min-height: 38px; padding: 0 12px; border: 1px solid #343434; border-radius: 2px; background: #101010; color: #ddd; font-size: 10px; white-space: nowrap; cursor: pointer; }

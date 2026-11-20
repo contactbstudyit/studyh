@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getAdminMfaStatus, hasAdminTotpAal2 } from "@/lib/admin-mfa";
-import { createVideoUploadTarget } from "@/lib/r2-storage";
-import { CloudflareVideoAccountRecord, decryptCloudflareCredential } from "@/lib/cloudflare-video-accounts";
+import { createVideoUploadTarget, getConfiguredVideoR2Account } from "@/lib/r2-storage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,9 +27,9 @@ export async function POST(request: NextRequest) {
   const auth = await authorizeAdmin();
   if ("error" in auth) return NextResponse.json({ error: auth.error }, { status: auth.status, headers: { "Cache-Control": "no-store" } });
   try {
-    const body = await request.json() as { filename?: unknown; contentType?: unknown; size?: unknown; storageAccountId?: unknown };
-    if (typeof body.storageAccountId !== "string" || !/^[0-9a-f-]{36}$/i.test(body.storageAccountId)) {
-      return NextResponse.json({ error: "Choose a Cloudflare video storage account" }, { status: 400 });
+    const body = await request.json() as { filename?: unknown; contentType?: unknown; size?: unknown; storageAccountSlot?: unknown };
+    if (typeof body.storageAccountSlot !== "string" || !/^\d{1,2}$/.test(body.storageAccountSlot)) {
+      return NextResponse.json({ error: "Choose a configured Cloudflare video account slot" }, { status: 400 });
     }
     const contentType = body.contentType;
     if (typeof body.filename !== "string" || body.filename.length < 1 || body.filename.length > 255) {
@@ -43,21 +42,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Video file must be between 1 byte and 10 GB" }, { status: 413 });
     }
 
-    const { data: row, error: accountError } = await auth.supabase.from("cloudflare_video_accounts").select("*").eq("id", body.storageAccountId).eq("is_active", true).maybeSingle();
-    if (accountError || !row) return NextResponse.json({ error: "Selected Cloudflare account is unavailable" }, { status: 404 });
-    const account = row as CloudflareVideoAccountRecord;
-    const target = await createVideoUploadTarget({
-      id: account.id,
-      accountId: account.account_id,
-      accessKeyId: decryptCloudflareCredential(account.access_key_id_ciphertext),
-      secretAccessKey: decryptCloudflareCredential(account.secret_access_key_ciphertext),
-      endpoint: account.endpoint,
-      bucketName: account.bucket_name,
-      publicUrl: account.public_url,
-    }, body.filename, contentType, body.size);
+    const account = getConfiguredVideoR2Account(body.storageAccountSlot);
+    if (!account) return NextResponse.json({ error: "Selected Cloudflare account slot is not fully configured in server secrets" }, { status: 404 });
+    const target = await createVideoUploadTarget(account, body.filename, contentType, body.size);
     return NextResponse.json(target, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     if (process.env.NODE_ENV === "development") console.error("[admin-video-upload] Could not prepare direct video upload", { errorType: error instanceof Error ? error.name : "UnknownError" });
-    return NextResponse.json({ error: error instanceof Error && error.message.includes("not configured") ? "Video storage is not configured yet. Check the second-account video R2 secrets." : "Could not prepare the video upload. Check the video R2 configuration and try again." }, { status: 503, headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ error: error instanceof Error && error.message.includes("not configured") ? "Video storage is not configured. Check the selected Cloudflare account slot secrets." : "Could not prepare the video upload. Check the selected Cloudflare account configuration and try again." }, { status: 503, headers: { "Cache-Control": "no-store" } });
   }
 }

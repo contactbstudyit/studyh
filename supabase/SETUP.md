@@ -1,6 +1,6 @@
 # Supabase setup
 
-1. Apply pending migrations in order in the Supabase SQL Editor. The current sequence is `202610010001_video_library.sql` through `202610010010_cloudflare_video_accounts.sql`; do not re-run migrations already applied.
+1. Apply pending migrations in order in the Supabase SQL Editor. The current sequence is `202610010001_video_library.sql` through `202610010011_cloudflare_video_account_slots.sql`; do not re-run migrations already applied.
 2. In Supabase Authentication, create the user `contact.eonemusic@gmail.com` with the password you intend to use. Email confirmation can remain disabled.
 3. Grant admin membership to that Auth user in the SQL Editor:
 
@@ -24,8 +24,8 @@ In Supabase Auth settings, keep TOTP enrollment, challenge, and verification ena
 
 The required environment values are `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` (a Supabase publishable key is also accepted as the key value). Public videos and categories are readable through RLS; all mutations require an authenticated user whose ID exists in `public.admins`.
 
-## Separate Cloudflare video accounts
+## Cloudflare video account slots
 
-Apply migration `202610010010_cloudflare_video_accounts.sql` before using the Cloudflare video account manager. Set `CLOUDFLARE_ACCOUNT_ENCRYPTION_KEY` as a server-only secret: it must be a base64 encoding of exactly 32 cryptographically random bytes. It encrypts R2 access keys before they are stored in the admin-only account table. Keep it backed up securely; changing it makes saved account credentials unreadable until they are re-entered.
+Cloudflare account credentials are configured only as server-side deployment secrets, not entered or stored in the admin UI or Supabase. Configure numbered slots using `CLOUDFLARE_VIDEO_R2_ACCOUNT_ID_1`, `CLOUDFLARE_VIDEO_R2_ACCESS_KEY_ID_1`, `CLOUDFLARE_VIDEO_R2_SECRET_ACCESS_KEY_1`, `CLOUDFLARE_VIDEO_R2_BUCKET_NAME_1`, and `CLOUDFLARE_VIDEO_R2_PUBLIC_URL_1`; repeat with `_2`, `_3`, etc. The selector also accepts the equivalent numbered prefix format, such as `2_CLOUDFLARE_VIDEO_R2_ACCOUNT_ID`, for credentials already configured that way. Optionally set `CLOUDFLARE_VIDEO_R2_ACCOUNT_NAME_1` for a friendly selector label and `CLOUDFLARE_VIDEO_R2_DEFAULT_ACCOUNT` to the default slot number. Account IDs, keys, buckets, and public URLs remain backend-only; the admin receives only slot labels and bucket names. No encryption-key secret is needed because account credentials remain deployment secrets.
 
-The video bucket's R2 CORS policy must allow `PUT` requests with the `Content-Type` header from the production site and each active preview origin. The presigned upload URL is short-lived and scoped to a single object in the selected bucket. Existing `CLOUDFLARE_R2_*` thumbnail credentials remain separate and are not changed by the video account manager.
+Apply migration `202610010011_cloudflare_video_account_slots.sql` so each uploaded video record stores its account slot and bucket name. R2 public CORS must allow `PUT` and the `Content-Type` header from the production origin and the active preview origin. Presigned uploads go directly from the browser to the selected R2 endpoint; the existing `CLOUDFLARE_R2_*` thumbnail credentials and thumbnail storage are separate and unchanged.

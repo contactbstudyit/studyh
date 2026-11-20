@@ -1,0 +1,48 @@
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { getAdminMfaStatus, hasAdminTotpAal2 } from "@/lib/admin-mfa";
+import { createVideoUploadTarget } from "@/lib/r2-storage";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+const MAX_VIDEO_BYTES = 5 * 1024 * 1024 * 1024;
+
+async function authorizeAdmin() {
+  try {
+    const supabase = await createClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) return { error: "Admin authentication required", status: 401 } as const;
+    const { data: membership, error: membershipError } = await supabase.from("admins").select("user_id").eq("user_id", user.id).maybeSingle();
+    if (membershipError || !membership) return { error: "Admin authorization required", status: 403 } as const;
+    const mfaStatus = await getAdminMfaStatus(supabase);
+    if (mfaStatus.error || !hasAdminTotpAal2(mfaStatus)) return { error: "Authenticator verification required", status: 403 } as const;
+    return { supabase } as const;
+  } catch {
+    return { error: "Admin authorization could not be verified", status: 503 } as const;
+  }
+}
+
+export async function POST(request: NextRequest) {
+  const auth = await authorizeAdmin();
+  if ("error" in auth) return NextResponse.json({ error: auth.error }, { status: auth.status, headers: { "Cache-Control": "no-store" } });
+  try {
+    const body = await request.json() as { filename?: unknown; contentType?: unknown; size?: unknown };
+    const contentType = body.contentType;
+    if (typeof body.filename !== "string" || body.filename.length < 1 || body.filename.length > 255) {
+      return NextResponse.json({ error: "Choose a valid video filename" }, { status: 400 });
+    }
+    if (contentType !== "video/mp4" && contentType !== "video/webm") {
+      return NextResponse.json({ error: "Only MP4 and WebM video uploads are supported" }, { status: 415 });
+    }
+    if (typeof body.size !== "number" || !Number.isSafeInteger(body.size) || body.size <= 0 || body.size > MAX_VIDEO_BYTES) {
+      return NextResponse.json({ error: "Video file must be between 1 byte and 5 GB" }, { status: 413 });
+    }
+
+    const target = await createVideoUploadTarget(body.filename, contentType, body.size);
+    return NextResponse.json(target, { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    if (process.env.NODE_ENV === "development") console.error("[admin-video-upload] Could not prepare direct video upload", { errorType: error instanceof Error ? error.name : "UnknownError" });
+    return NextResponse.json({ error: error instanceof Error && error.message.includes("not configured") ? "Video storage is not configured yet. Check the second-account video R2 secrets." : "Could not prepare the video upload. Check the video R2 configuration and try again." }, { status: 503, headers: { "Cache-Control": "no-store" } });
+  }
+}

@@ -210,6 +210,17 @@ body { background: #000; color: #fff; font-family: var(--font-geist-sans), syste
 .admin-reset-link { display: block; width: 100%; margin-top: 12px; border: 0; background: transparent; color: #aaa79f; text-align: center; font-size: 11px; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .admin-reset-link:disabled { opacity: .55; cursor: wait; }
 .admin-reset-continue { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+.video-source-mode { display: flex; width: fit-content; gap: 4px; margin: 0 0 18px; padding: 3px; border: 1px solid var(--line); background: #0a0a09; }
+.video-source-mode button { min-height: 40px; padding: 0 16px; border: 0; background: transparent; color: #aaa79f; font-size: 11px; cursor: pointer; }
+.video-source-mode button.active { background: #292824; color: #f2efe7; }
+.video-source-mode button:disabled { opacity: .55; cursor: wait; }
+.video-upload-field { display: grid; gap: 8px; margin-bottom: 17px; }
+.video-upload-field > label { color: #b5b2ab; font-size: 9px; letter-spacing: 1.2px; }
+.video-upload-field input[type=file] { width: 100%; min-height: 44px; padding: 9px; border: 1px solid var(--line); background: #0b0b0a; color: #bdbab2; font-size: 12px; }
+.video-upload-field small,.video-upload-file-summary { color: #85827a; font-size: 10px; line-height: 1.6; }
+.video-upload-file-summary { margin: 0; overflow-wrap: anywhere; }
+.video-upload-progress { display: grid; gap: 7px; color: #c8c3b6; font-size: 11px; }
+.video-upload-progress progress { width: 100%; height: 5px; accent-color: #d7c6a3; }
 .thumbnail-error-detail { color: #a29a91; }
 .video-header-actions { display: flex; align-items: center; gap: 8px; }
 .secondary-action { min-height: 38px; padding: 0 12px; border: 1px solid #343434; border-radius: 2px; background: #101010; color: #ddd; font-size: 10px; white-space: nowrap; cursor: pointer; }

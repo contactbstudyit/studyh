@@ -47,9 +47,12 @@ $$;
 revoke all on function public.record_reel_impression(uuid, uuid, boolean) from public;
 grant execute on function public.record_reel_impression(uuid, uuid, boolean) to anon, authenticated;
 
+drop function if exists public.fresh_category_reels(uuid, uuid, integer, integer, uuid[]);
+
 create or replace function public.fresh_category_reels(
   p_visitor_id uuid,
   p_category_id uuid,
+  p_feed_session_id uuid,
   p_page integer default 1,
   p_page_size integer default 4,
   p_exclude_ids uuid[] default '{}'
@@ -90,12 +93,12 @@ as $$
     c.created_at, c.updated_at, c.video_url
   from candidates c
   order by c.recommendation_tier,
-    case when c.recommendation_tier < 2 then md5(p_visitor_id::text || ':' || c.id::text) else '' end,
+    case when c.recommendation_tier < 2 then md5(p_visitor_id::text || ':' || p_feed_session_id::text || ':' || c.id::text) else '' end,
     case when c.recommendation_tier = 2 then c.last_shown_at else null end nulls first,
     c.created_at desc, c.id
   offset greatest(0, (p_page - 1) * least(greatest(p_page_size, 1), 20))
   limit least(greatest(p_page_size, 1), 20);
 $$;
 
-revoke all on function public.fresh_category_reels(uuid, uuid, integer, integer, uuid[]) from public;
-grant execute on function public.fresh_category_reels(uuid, uuid, integer, integer, uuid[]) to anon, authenticated;
+revoke all on function public.fresh_category_reels(uuid, uuid, uuid, integer, integer, uuid[]) from public;
+grant execute on function public.fresh_category_reels(uuid, uuid, uuid, integer, integer, uuid[]) to anon, authenticated;

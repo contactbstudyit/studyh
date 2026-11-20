@@ -1,6 +1,6 @@
 # Supabase setup
 
-1. Apply pending migrations in order in the Supabase SQL Editor. The current sequence is `202610010001_video_library.sql` through `202610010011_cloudflare_video_account_slots.sql`; do not re-run migrations already applied.
+1. Apply pending migrations in order in the Supabase SQL Editor. The current sequence is `202610010001_video_library.sql` through `202610010013_reel_feed_session_seed.sql`; do not re-run migrations already applied.
 2. In Supabase Authentication, create the user `contact.eonemusic@gmail.com` with the password you intend to use. Email confirmation can remain disabled.
 3. Grant admin membership to that Auth user in the SQL Editor:
 

@@ -61,6 +61,7 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
   const activeVideoElementRef = useRef<HTMLVideoElement | null>(null);
   const pausedReelForAdRef = useRef<{ video: HTMLVideoElement; videoId: string; time: number; muted: boolean; volume: number; wasPlaying: boolean } | null>(null);
   const visitorIdRef = useRef<string | null>(null);
+  const feedSessionIdRef = useRef<string | null>(null);
   const impressedReelIdsRef = useRef(new Set<string>());
   const watchedReelIdsRef = useRef(new Set<string>());
   const slotPlaybackStatusRef = useRef<Record<PlayerSlot, ReelPlaybackStatus>>({ a: "loading", b: "loading" });
@@ -243,6 +244,7 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
     loadingRef.current = true;
     setError("");
     if (replace) {
+      feedSessionIdRef.current = crypto.randomUUID();
       updateAdPlacements([]);
       pendingAdIdRef.current = null;
       activeAdIdRef.current = null;
@@ -272,7 +274,10 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
     try {
       const visitorId = visitorIdRef.current ?? getReelVisitorId();
       visitorIdRef.current = visitorId;
+      const feedSessionId = feedSessionIdRef.current ?? crypto.randomUUID();
+      feedSessionIdRef.current = feedSessionId;
       const params = new URLSearchParams({ page: String(nextPage) });
+      params.set("feedSessionId", feedSessionId);
       for (const item of videosRef.current) params.append("excludeId", item.video.id);
       const response = await fetch(`/api/public/category-reels/${encodeURIComponent(slug)}?${params.toString()}`, { cache: "no-store", headers: { "x-reel-visitor-id": visitorId } });
       const payload = await response.json() as ReelResponse;

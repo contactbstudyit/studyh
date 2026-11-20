@@ -28,10 +28,13 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
     const headerVisitor = request.headers.get("x-reel-visitor-id") ?? "";
     const visitorId = authenticatedVisitor ?? (UUID_PATTERN.test(headerVisitor) ? headerVisitor : null);
     if (!visitorId) return NextResponse.json({ error: "A reel visitor identifier is required" }, { status: 400 });
+    const feedSessionId = request.nextUrl.searchParams.get("feedSessionId") ?? "";
+    if (!UUID_PATTERN.test(feedSessionId)) return NextResponse.json({ error: "A valid feed session identifier is required" }, { status: 400 });
     const excludeIds = request.nextUrl.searchParams.getAll("excludeId").filter((id) => UUID_PATTERN.test(id)).slice(0, 100);
     const { data, error } = await supabase.rpc("fresh_category_reels", {
       p_visitor_id: visitorId,
       p_category_id: category.id,
+      p_feed_session_id: feedSessionId,
       p_page: excludeIds.length ? 1 : page,
       p_page_size: PAGE_SIZE,
       p_exclude_ids: excludeIds,

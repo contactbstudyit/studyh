@@ -54,23 +54,5 @@ export default function AdminLogin() {
     }
     finally { setBusy(false); }
   }
-  async function requestPasswordReset() {
-    setError("");
-    const normalizedEmail = email.trim();
-    if (!normalizedEmail) { setError("Enter your admin email above, then choose Forgot password."); return; }
-    setBusy(true);
-    try {
-      const client = createClient();
-      const { error: resetError } = await client.auth.resetPasswordForEmail(normalizedEmail, {
-        redirectTo: new URL("/admin/reset-password", window.location.origin).toString(),
-      });
-      if (resetError) throw resetError;
-      setError("If this email belongs to an admin account, a password reset link has been sent. Check your inbox and spam folder.");
-    } catch {
-      setError("Could not send the reset email. Check the Supabase recovery URL configuration and try again.");
-    } finally {
-      setBusy(false);
-    }
-  }
-  return <main className="auth-page"><div className="auth-card"><form onSubmit={submit}><ShieldCheck size={22}/><span className="eyebrow">RESTRICTED ACCESS</span><h1>Admin sign in</h1><p>Sign in with your authorized admin account.</p><label>Email<input name="email" type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} required/></label><label>Password<input name="password" type="password" autoComplete="current-password" required/></label>{error && <div className="auth-error" role="status">{error}</div>}<button className="button-primary" type="submit" disabled={busy}>{busy ? "Signing in..." : "Sign in"}</button><button className="admin-reset-link" type="button" onClick={() => void requestPasswordReset()} disabled={busy}>Forgot password?</button></form><Link href="/">Return to videos</Link></div></main>;
+  return <main className="auth-page"><div className="auth-card"><form onSubmit={submit}><ShieldCheck size={22}/><span className="eyebrow">RESTRICTED ACCESS</span><h1>Admin sign in</h1><p>Sign in with your authorized admin account.</p><label>Email<input name="email" type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} required/></label><label>Password<input name="password" type="password" autoComplete="current-password" required/></label>{error && <div className="auth-error" role="status">{error}</div>}<button className="button-primary" type="submit" disabled={busy}>{busy ? "Signing in..." : "Sign in"}</button></form><Link href="/">Return to videos</Link></div></main>;
 }

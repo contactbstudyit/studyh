@@ -231,9 +231,31 @@ export function useVideos(options: { categoryId?: string; search?: string; searc
   }, [admin, categoryId, search, searchCategoryIds, published, sort, pageNumber, pageSize, dailyFeed]);
   useEffect(() => { if (enabled) void fetchPage(pageNumber === undefined ? 0 : Math.max(1, pageNumber) - 1); }, [enabled, fetchPage, pageNumber]);
   const refresh = useCallback(() => fetchPage(pageNumber === undefined ? 0 : Math.max(1, pageNumber) - 1), [fetchPage, pageNumber]);
+  type VideoCreateResult = { video: VideoRecord | null; error: string | null };
+  async function createDetailed(input: Omit<VideoRecord, "id" | "created_at" | "updated_at" | "views" | "display_view_count" | "published_at" | "display_views" | "categories">): Promise<VideoCreateResult> {
+    try {
+      const client = createClient();
+      const { data: existingRows, error: existingError } = await client.from("videos").select("*, categories(name)").eq("video_url", input.video_url).eq("title", input.title).limit(1);
+      if (existingError) throw existingError;
+      if (existingRows?.[0]) return { video: existingRows[0] as VideoRecord, error: null };
+      const { data, error } = await client.from("videos").insert(input).select("*, categories(name)").single();
+      if (error) {
+        const detail = [error.message, error.details, error.hint, error.code ? `code ${error.code}` : ""].filter(Boolean).join(" — ");
+        throw new Error(detail || "Database rejected the video record");
+      }
+      const video = data as VideoRecord;
+      setVideos((old) => [video, ...old]);
+      return { video, error: null };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not save the video record";
+      if (process.env.NODE_ENV === "development") console.error("[video-create] database save failed", { message: message.slice(0, 300) });
+      return { video: null, error: message };
+    }
+  }
   async function create(input: Omit<VideoRecord, "id" | "created_at" | "updated_at" | "views" | "display_view_count" | "published_at" | "display_views" | "categories">): Promise<VideoRecord | null> {
-    try { const { data, error } = await createClient().from("videos").insert(input).select("*, categories(name)").single(); if (error) throw error; const video = data as VideoRecord; setVideos((old) => [video, ...old]); return video; }
-    catch { toast.error("Could not add video. Check the URL and category."); return null; }
+    const result = await createDetailed(input);
+    if (result.error) toast.error(`Could not save video: ${result.error}`);
+    return result.video;
   }
   async function update(id: string, input: Partial<Omit<VideoRecord, "id" | "created_at" | "updated_at" | "views" | "display_view_count" | "published_at" | "display_views" | "categories">>) {
     try { const { data, error } = await createClient().from("videos").update({ ...input, updated_at: new Date().toISOString() }).eq("id", id).select("*, categories(name)").single(); if (error) throw error; setVideos((old) => old.map((item) => item.id === id ? data as VideoRecord : item)); toast.success("Video updated."); return true; }
@@ -286,7 +308,7 @@ export function useVideos(options: { categoryId?: string; search?: string; searc
     if (counted) setVideos((old) => old.map((video) => video.id === id ? { ...video, views: video.views + 1 } : video));
   }
   const loadMore = () => { if (hasMore && !loading) void fetchPage(page + 1, true); };
-  return { videos, loading, hasMore, page, totalCount, refresh, loadMore, create, update, remove, getMissingThumbnails, getAllVideosForThumbnailRegeneration, recordView };
+  return { videos, loading, hasMore, page, totalCount, refresh, loadMore, create, createDetailed, update, remove, getMissingThumbnails, getAllVideosForThumbnailRegeneration, recordView };
 }
 
 export function useRecommendedVideos(currentVideo: Pick<VideoRecord, "id" | "category_id">) {

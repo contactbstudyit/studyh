@@ -394,7 +394,15 @@ export default function AdminDashboard() {
       if (editingVideo) {
         const updated = await videosHook.update(editingVideo.id, data);
         if (updated) savedVideo = { ...editingVideo, ...data, updated_at: new Date().toISOString() };
-      } else savedVideo = await videosHook.create(data);
+      } else {
+        let saveResult = await videosHook.createDetailed(data);
+        for (let retry = 0; !saveResult.video && retry < 2; retry += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 500 * (retry + 1)));
+          saveResult = await videosHook.createDetailed(data);
+        }
+        if (!saveResult.video) throw new Error(saveResult.error || "Database rejected the video record. The upload is complete; retry will not upload the file again.");
+        savedVideo = saveResult.video;
+      }
     } catch (error) {
       setVideoUploadError(error instanceof Error ? error.message : "Video upload failed. Please try again.");
       toast.error(error instanceof Error ? error.message : "Video upload failed. Please try again.");
@@ -470,8 +478,14 @@ export default function AdminDashboard() {
             updateBulkUploadItems((current) => current.map((item) => item.id === batchItem.id ? { ...item, uploadedUrl: publicUrl, storageAccountSlot, bucketName, progress: 100 } : item));
           }
           updateBulkUploadItems((current) => current.map((item) => item.id === batchItem.id ? { ...item, status: "saving" } : item));
-          const saved = await videosHook.create({ ...sharedFields, title: batchItem.title, video_url: publicUrl!, thumbnail_url: null, cloudflare_video_account_slot: storageAccountSlot ?? selectedAccount.id, cloudflare_video_bucket_name: bucketName ?? selectedAccount.bucketName });
-          if (!saved) throw new Error("Upload finished, but the video record could not be saved. Retry to save it without uploading the file again.");
+          const recordInput = { ...sharedFields, title: batchItem.title, video_url: publicUrl!, thumbnail_url: null, cloudflare_video_account_slot: storageAccountSlot ?? selectedAccount.id, cloudflare_video_bucket_name: bucketName ?? selectedAccount.bucketName };
+          let saveResult = await videosHook.createDetailed(recordInput);
+          for (let retry = 0; !saveResult.video && retry < 2; retry += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 500 * (retry + 1)));
+            saveResult = await videosHook.createDetailed(recordInput);
+          }
+          if (!saveResult.video) throw new Error(saveResult.error || "Database rejected the video record. The upload is complete; retry will not upload the file again.");
+          const saved = saveResult.video;
           updateBulkUploadItems((current) => current.map((item) => item.id === batchItem.id ? { ...item, status: "saved", progress: 100, error: undefined } : item));
           succeeded++;
           void generateThumbnailFor(saved, { quiet: true, refreshAfter: false });

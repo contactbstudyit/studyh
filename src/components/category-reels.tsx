@@ -10,6 +10,7 @@ import MobileBottomNavigation from "@/components/mobile-bottom-navigation";
 import type { VideoRecord } from "@/hooks/use-library";
 import PublicViewCount from "@/components/public-view-count";
 import type { VideoSourceType } from "@/lib/video-playback";
+import { getReelVisitorId } from "@/lib/reel-visitor";
 
 type ReelVideo = Omit<VideoRecord, "video_url" | "views" | "display_view_count" | "published_at" | "display_views">;
 type ReelItem = { video: ReelVideo; playbackUrl: string; playbackType: VideoSourceType; sourceHost: string; displayViews: number };
@@ -59,6 +60,9 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
   const slotVideoElementsRef = useRef<Record<PlayerSlot, HTMLVideoElement | null>>({ a: null, b: null });
   const activeVideoElementRef = useRef<HTMLVideoElement | null>(null);
   const pausedReelForAdRef = useRef<{ video: HTMLVideoElement; videoId: string; time: number; muted: boolean; volume: number; wasPlaying: boolean } | null>(null);
+  const visitorIdRef = useRef<string | null>(null);
+  const impressedReelIdsRef = useRef(new Set<string>());
+  const watchedReelIdsRef = useRef(new Set<string>());
   const slotPlaybackStatusRef = useRef<Record<PlayerSlot, ReelPlaybackStatus>>({ a: "loading", b: "loading" });
   const slotAudioAvailabilityRef = useRef<Record<PlayerSlot, { videoId: string | null; availability: ReelAudioAvailability }>>({
     a: { videoId: null, availability: "unknown" },
@@ -114,6 +118,11 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
   }, [updateAdPlacements]);
 
   const onNormalReelPlaybackStarted = useCallback((videoId: string) => {
+    if (!watchedReelIdsRef.current.has(videoId)) {
+      watchedReelIdsRef.current.add(videoId);
+      const visitorId = visitorIdRef.current;
+      if (visitorId) void fetch("/api/public/reels/impression", { method: "POST", headers: { "Content-Type": "application/json", "x-reel-visitor-id": visitorId }, body: JSON.stringify({ videoId, watched: true }), keepalive: true }).catch(() => {});
+    }
     if (mobileViewport !== true || countedReelIdsRef.current.has(videoId)) return;
     countedReelIdsRef.current.add(videoId);
     reelCountSinceAdRef.current += 1;
@@ -128,6 +137,13 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
     reelCountSinceAdRef.current = 0;
     nextAdThresholdRef.current = 3 + Math.floor(Math.random() * 3);
   }, [mobileViewport, updateAdPlacements]);
+
+  const recordReelImpression = useCallback((videoId: string) => {
+    if (impressedReelIdsRef.current.has(videoId)) return;
+    impressedReelIdsRef.current.add(videoId);
+    const visitorId = visitorIdRef.current;
+    if (visitorId) void fetch("/api/public/reels/impression", { method: "POST", headers: { "Content-Type": "application/json", "x-reel-visitor-id": visitorId }, body: JSON.stringify({ videoId, watched: false }), keepalive: true }).catch(() => {});
+  }, []);
 
   const activateAd = useCallback((adId: string) => {
     if (mobileViewport !== true || activeAdIdRef.current === adId) return;
@@ -254,7 +270,11 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
       setActiveAudioAvailability("unknown");
     } else setLoadingMore(true);
     try {
-      const response = await fetch(`/api/public/category-reels/${encodeURIComponent(slug)}?page=${nextPage}`, { cache: "no-store" });
+      const visitorId = visitorIdRef.current ?? getReelVisitorId();
+      visitorIdRef.current = visitorId;
+      const params = new URLSearchParams({ page: String(nextPage) });
+      for (const item of videosRef.current) params.append("excludeId", item.video.id);
+      const response = await fetch(`/api/public/category-reels/${encodeURIComponent(slug)}?${params.toString()}`, { cache: "no-store", headers: { "x-reel-visitor-id": visitorId } });
       const payload = await response.json() as ReelResponse;
       if (!response.ok) throw new Error("Could not load category reels.");
       setVideos((current) => replace ? payload.videos : [...current, ...payload.videos]);
@@ -283,6 +303,10 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
   }, []);
 
   useEffect(() => { void loadPage(1, true); }, [loadPage]);
+
+  useEffect(() => {
+    visitorIdRef.current = getReelVisitorId();
+  }, []);
 
   useEffect(() => {
     const breakpoint = window.matchMedia("(max-width: 720px)");
@@ -378,7 +402,11 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
         activateAd(activeSlide.dataset.adId);
       } else {
         const videoIndex = Number(activeSlide.dataset.reelIndex);
-        if (Number.isInteger(videoIndex)) activateReelOrLeaveAd(videoIndex);
+        if (Number.isInteger(videoIndex)) {
+          const reel = videosRef.current[videoIndex];
+          if (reel) recordReelImpression(reel.video.id);
+          activateReelOrLeaveAd(videoIndex);
+        }
       }
     }, { root, threshold: [0.6, 0.8] });
     root.querySelectorAll<HTMLElement>("[data-feed-index]").forEach((slide) => observer.observe(slide));

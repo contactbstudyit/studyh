@@ -1,4 +1,4 @@
-import { DeleteObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomUUID } from "node:crypto";
 
@@ -98,6 +98,60 @@ export async function createVideoUploadTarget(account: VideoR2AccountConfigurati
   const uploadUrl = await getSignedUrl(config.client as never, command as never, { expiresIn: 900 });
   const publicUrl = `${config.publicBaseUrl.toString().replace(/\/$/, "")}/${key.split("/").map(encodeURIComponent).join("/")}`;
   return { uploadUrl, publicUrl, contentType, expiresIn: 900, storageAccountSlot: account.id, bucketName: account.bucketName };
+}
+
+export type VideoR2Object = { key: string; size: number; lastModified: string | null; publicUrl: string };
+
+function encodeR2Key(key: string) {
+  return key.split("/").map(encodeURIComponent).join("/");
+}
+
+export async function listVideoR2Objects(slot: string, continuationToken?: string | null) {
+  const account = getConfiguredVideoR2Account(slot);
+  if (!account) throw new Error("Selected Cloudflare video account slot is not configured");
+  const config = getVideoClient(account);
+  const page = await config.client.send(new ListObjectsV2Command({
+    Bucket: config.bucket,
+    Prefix: "videos/",
+    MaxKeys: 100,
+    ...(continuationToken ? { ContinuationToken: continuationToken } : {}),
+  }));
+  const objects: VideoR2Object[] = (page.Contents ?? []).filter((item) => item.Key && item.Key !== "videos/").map((item) => ({
+    key: item.Key!,
+    size: item.Size ?? 0,
+    lastModified: item.LastModified?.toISOString() ?? null,
+    publicUrl: `${config.publicBaseUrl.toString().replace(/\/$/, "")}/${encodeR2Key(item.Key!)}`,
+  }));
+  return { objects, nextContinuationToken: page.IsTruncated ? page.NextContinuationToken ?? null : null };
+}
+
+export async function getVideoR2StorageUsage(slot: string) {
+  const account = getConfiguredVideoR2Account(slot);
+  if (!account) throw new Error("Selected Cloudflare video account slot is not configured");
+  const config = getVideoClient(account);
+  let continuationToken: string | undefined;
+  let objectCount = 0;
+  let totalBytes = 0;
+  do {
+    const page = await config.client.send(new ListObjectsV2Command({ Bucket: config.bucket, Prefix: "videos/", MaxKeys: 1000, ...(continuationToken ? { ContinuationToken: continuationToken } : {}) }));
+    for (const item of page.Contents ?? []) {
+      if (!item.Key || item.Key === "videos/") continue;
+      objectCount += 1;
+      totalBytes += item.Size ?? 0;
+    }
+    continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
+  } while (continuationToken);
+  return { objectCount, totalBytes };
+}
+
+export async function deleteVideoR2Object(slot: string, key: string) {
+  const account = getConfiguredVideoR2Account(slot);
+  if (!account) throw new Error("Selected Cloudflare video account slot is not configured");
+  if (!/^videos\/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/[A-Za-z0-9._-]{1,100}$/i.test(key)) {
+    throw new Error("Object key is outside the managed video upload namespace");
+  }
+  const config = getVideoClient(account);
+  await config.client.send(new DeleteObjectCommand({ Bucket: config.bucket, Key: key }));
 }
 
 function getConfiguration(): R2Configuration {

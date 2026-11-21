@@ -109,6 +109,7 @@ export default function AdminDashboard() {
   const [cloudflareStorageError, setCloudflareStorageError] = useState("");
   const [cloudflareStorageBusyKey, setCloudflareStorageBusyKey] = useState("");
   const [selectedStorageObjectKeys, setSelectedStorageObjectKeys] = useState<Set<string>>(() => new Set());
+  const [preparedStorageDownloads, setPreparedStorageDownloads] = useState<Array<{ key: string; url: string }>>([]);
   const [storageBulkActionBusy, setStorageBulkActionBusy] = useState(false);
   const cloudflareStorageRequestRef = useRef(0);
   const videoSubmitLock = useRef(false);
@@ -409,6 +410,7 @@ export default function AdminDashboard() {
   }
 
   function toggleStorageObjectSelection(key: string) {
+    setPreparedStorageDownloads([]);
     setSelectedStorageObjectKeys((current) => {
       const next = new Set(current);
       if (next.has(key)) next.delete(key); else next.add(key);
@@ -417,13 +419,14 @@ export default function AdminDashboard() {
   }
 
   function toggleAllVisibleStorageObjects() {
+    setPreparedStorageDownloads([]);
     const visibleKeys = cloudflareStorageView?.objects.map((object) => object.key) ?? [];
     setSelectedStorageObjectKeys((current) => visibleKeys.length > 0 && visibleKeys.every((key) => current.has(key))
       ? new Set([...current].filter((key) => !visibleKeys.includes(key)))
       : new Set([...current, ...visibleKeys]));
   }
 
-  async function downloadSelectedStorageObjects() {
+  async function prepareSelectedStorageDownloads() {
     const slot = cloudflareStorageView?.account.id;
     const keys = [...selectedStorageObjectKeys];
     if (!slot || !keys.length || storageBulkActionBusy) return;
@@ -436,24 +439,28 @@ export default function AdminDashboard() {
       });
       const result = await response.json() as { downloads?: Array<{ key: string; url: string }>; error?: string };
       if (!response.ok || !result.downloads) throw new Error(result.error || "Could not prepare selected downloads");
-      for (const [index, download] of result.downloads.entries()) {
-        window.setTimeout(() => {
-          const link = document.createElement("a");
-          link.href = download.url;
-          link.target = "_blank";
-          link.rel = "noopener noreferrer";
-          link.style.display = "none";
-          document.body.appendChild(link);
-          link.click();
-          link.remove();
-        }, index * 250);
-      }
-      toast.success(`Prepared ${result.downloads.length} direct R2 download${result.downloads.length === 1 ? "" : "s"}. Your browser may ask to allow multiple downloads.`);
+      setPreparedStorageDownloads(result.downloads);
+      toast.success(`${result.downloads.length} direct R2 download${result.downloads.length === 1 ? "" : "s"} ready. Click Start downloads to begin.`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not start selected downloads.");
     } finally {
       setStorageBulkActionBusy(false);
     }
+  }
+
+  function startPreparedStorageDownloads() {
+    if (!preparedStorageDownloads.length) return;
+    for (const download of preparedStorageDownloads) {
+      const link = document.createElement("a");
+      link.href = download.url;
+      link.download = download.key.split("/").pop() ?? "video";
+      link.rel = "noreferrer";
+      link.style.display = "none";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    }
+    toast.success(`Started ${preparedStorageDownloads.length} direct R2 download${preparedStorageDownloads.length === 1 ? "" : "s"}. If your browser asks, allow multiple downloads for this site.`);
   }
 
   async function deleteSelectedStorageObjects() {
@@ -471,6 +478,7 @@ export default function AdminDashboard() {
       const result = await response.json() as { deletedCount?: number; error?: string };
       if (!response.ok || typeof result.deletedCount !== "number") throw new Error(result.error || "Could not delete selected objects");
       setSelectedStorageObjectKeys(new Set());
+      setPreparedStorageDownloads([]);
       toast.success(`Deleted ${result.deletedCount} storage object${result.deletedCount === 1 ? "" : "s"}.`);
       await loadCloudflareStorage();
     } catch (error) {
@@ -1020,13 +1028,14 @@ export default function AdminDashboard() {
         {section === "Categories" && <><div className="admin-heading"><div><span className="eyebrow">ORGANIZE</span><h1>Categories</h1><p>Create and manage library categories.</p></div><button className="button-primary" onClick={() => openCategory()}><Plus size={15}/> Add category</button></div><div className="category-admin-list">{categoriesHook.categories.map((category) => <div className="category-admin-row" key={category.id}><div><strong>{category.name}</strong><span>{category.description || "No description"}</span></div><span>{category.video_count ?? 0} videos</span><button onClick={() => openCategory(category)}>Edit</button><button aria-label={`Delete ${category.name}`} onClick={() => deleteCategory(category)}><Trash2 size={15}/></button></div>)}{categoriesHook.categories.length === 0 && <p className="admin-empty">No categories yet. Create one to organize videos.</p>}</div></>}
         {section === "Cloudflare Storage" && <>
           <div className="admin-heading"><div><span className="eyebrow">VIDEO STORAGE</span><h1>Cloudflare Storage</h1><p>Inspect configured video buckets and manage uploaded R2 objects.</p></div></div>
-           <div className="cloudflare-storage-toolbar"><label><span>ACCOUNT / BUCKET</span><select value={selectedCloudflareAccountId} onChange={(event) => { setSelectedCloudflareAccountId(event.target.value); setSelectedStorageObjectKeys(new Set()); cloudflareStorageViewRef.current = null; setCloudflareStorageView(null); }} disabled={cloudflareAccountsLoading}><option value="">{cloudflareAccountsLoading ? "Loading accounts…" : "Select account"}</option>{cloudflareVideoAccounts.map((account) => <option key={account.id} value={account.id}>{account.name} — {account.bucketName}{account.isDefault ? " (default)" : ""}</option>)}</select></label><button className="secondary-action" type="button" onClick={() => void loadCloudflareStorage()} disabled={!selectedCloudflareAccountId || cloudflareStorageLoading}>{cloudflareStorageLoading ? "Refreshing…" : "Refresh storage"}</button></div>
+           <div className="cloudflare-storage-toolbar"><label><span>ACCOUNT / BUCKET</span><select value={selectedCloudflareAccountId} onChange={(event) => { setSelectedCloudflareAccountId(event.target.value); setSelectedStorageObjectKeys(new Set()); setPreparedStorageDownloads([]); cloudflareStorageViewRef.current = null; setCloudflareStorageView(null); }} disabled={cloudflareAccountsLoading}><option value="">{cloudflareAccountsLoading ? "Loading accounts…" : "Select account"}</option>{cloudflareVideoAccounts.map((account) => <option key={account.id} value={account.id}>{account.name} — {account.bucketName}{account.isDefault ? " (default)" : ""}</option>)}</select></label><button className="secondary-action" type="button" onClick={() => void loadCloudflareStorage()} disabled={!selectedCloudflareAccountId || cloudflareStorageLoading}>{cloudflareStorageLoading ? "Refreshing…" : "Refresh storage"}</button></div>
           {cloudflareAccountsError && <p className="field-error" role="alert">{cloudflareAccountsError}</p>}
           {cloudflareStorageError && <p className="field-error" role="alert">{cloudflareStorageError} Check that this account’s R2 token has ListBucket permission.</p>}
           {cloudflareStorageLoading && !cloudflareStorageView && <p className="admin-empty" role="status">Inspecting Cloudflare bucket…</p>}
           {cloudflareStorageView && <>
             <div className="cloudflare-storage-summary"><div><span>CONFIGURED ACCOUNTS</span><strong>{cloudflareVideoAccounts.length}</strong></div><div><span>SELECTED BUCKET</span><strong>{cloudflareStorageView.account.bucketName}</strong><small>{cloudflareStorageView.account.name}</small></div><div><span>VIDEO OBJECTS</span><strong>{cloudflareStorageView.usage.objectCount.toLocaleString()}</strong></div><div><span>LIVE OBJECT DATA</span><strong>{formatStorageBytes(cloudflareStorageView.usage.totalBytes)}</strong><small>Sum of current video object sizes; excludes deleted versions and incomplete multipart uploads.</small></div></div>
-            <div className="cloudflare-storage-selection-bar"><span>{selectedStorageObjectKeys.size} selected</span><div><button className="secondary-action" type="button" disabled={!selectedStorageObjectKeys.size || storageBulkActionBusy} onClick={() => void downloadSelectedStorageObjects()}>{storageBulkActionBusy ? "Preparing…" : "Download selected"}</button><button className="cloudflare-storage-delete" type="button" disabled={!selectedStorageObjectKeys.size || storageBulkActionBusy} onClick={() => void deleteSelectedStorageObjects()}>{storageBulkActionBusy ? "Working…" : "Delete selected"}</button></div></div>
+            <div className="cloudflare-storage-selection-bar"><span>{selectedStorageObjectKeys.size} selected</span><div>{preparedStorageDownloads.length > 0 && <button className="secondary-action" type="button" onClick={startPreparedStorageDownloads}>Start downloads ({preparedStorageDownloads.length})</button>}<button className="secondary-action" type="button" disabled={!selectedStorageObjectKeys.size || storageBulkActionBusy} onClick={() => void prepareSelectedStorageDownloads()}>{storageBulkActionBusy ? "Preparing…" : preparedStorageDownloads.length ? "Prepare again" : "Download selected"}</button><button className="cloudflare-storage-delete" type="button" disabled={!selectedStorageObjectKeys.size || storageBulkActionBusy} onClick={() => void deleteSelectedStorageObjects()}>{storageBulkActionBusy ? "Working…" : "Delete selected"}</button></div></div>
+            {preparedStorageDownloads.length > 0 && <div className="cloudflare-download-queue"><p>Download links are ready. Start downloads, or click a file individually if your browser blocks multiple downloads.</p>{preparedStorageDownloads.map((item) => <a key={item.key} href={item.url} download={item.key.split("/").pop()}>{item.key.split("/").pop()}</a>)}</div>}
             <div className="cloudflare-storage-table-wrap"><table className="cloudflare-storage-table"><thead><tr><th><input type="checkbox" aria-label="Select all visible video objects" checked={cloudflareStorageView.objects.length > 0 && cloudflareStorageView.objects.every((object) => selectedStorageObjectKeys.has(object.key))} onChange={toggleAllVisibleStorageObjects} disabled={storageBulkActionBusy}/></th><th>Object</th><th>Size</th><th>Uploaded</th><th>Action</th></tr></thead><tbody>{cloudflareStorageView.objects.map((object) => <tr key={object.key}><td><input type="checkbox" aria-label={`Select ${object.key}`} checked={selectedStorageObjectKeys.has(object.key)} onChange={() => toggleStorageObjectSelection(object.key)} disabled={storageBulkActionBusy}/></td><td><a href={object.publicUrl} target="_blank" rel="noreferrer">{object.key}</a></td><td>{formatStorageBytes(object.size)}</td><td>{object.lastModified ? new Date(object.lastModified).toLocaleString() : "—"}</td><td><button className="cloudflare-storage-delete" type="button" disabled={Boolean(cloudflareStorageBusyKey) || storageBulkActionBusy} onClick={() => void deleteCloudflareVideoObject(object)}>{cloudflareStorageBusyKey === object.key ? "Deleting…" : "Delete object"}</button></td></tr>)}</tbody></table>{cloudflareStorageView.objects.length === 0 && <p className="admin-empty">No uploaded video objects in this bucket.</p>}</div>
             {cloudflareStorageView.nextContinuationToken && <button className="secondary-action cloudflare-storage-next" type="button" disabled={cloudflareStorageLoading} onClick={() => void loadCloudflareStorage(true)}>{cloudflareStorageLoading ? "Loading objects…" : "Load more objects"}</button>}
           </>}

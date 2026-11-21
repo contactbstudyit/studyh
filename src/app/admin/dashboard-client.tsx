@@ -35,7 +35,7 @@ function formatStorageBytes(bytes: number) {
   let value = bytes;
   let unit = -1;
   do { value /= 1024; unit += 1; } while (value >= 1024 && unit < units.length - 1);
-  return `${value.toLocaleString(undefined, { maximumFractionDigits: 3 })} ${units[unit]} (${bytes.toLocaleString()} bytes)`;
+  return `${value.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${units[unit]}`;
 }
 
 function titleFromVideoFilename(filename: string) {

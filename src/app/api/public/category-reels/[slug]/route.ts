@@ -31,7 +31,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
     const feedSessionId = request.nextUrl.searchParams.get("feedSessionId") ?? "";
     if (!UUID_PATTERN.test(feedSessionId)) return NextResponse.json({ error: "A valid feed session identifier is required" }, { status: 400 });
     const excludeIds = request.nextUrl.searchParams.getAll("excludeId").filter((id) => UUID_PATTERN.test(id)).slice(0, 100);
-    const { data, error } = await supabase.rpc("fresh_category_reels", {
+    let { data, error } = await supabase.rpc("fresh_category_reels", {
       p_visitor_id: visitorId,
       p_category_id: category.id,
       p_feed_session_id: feedSessionId,
@@ -39,6 +39,16 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
       p_page_size: PAGE_SIZE,
       p_exclude_ids: excludeIds,
     });
+
+    if (error?.code === "PGRST202" || error?.code === "42883") {
+      if (process.env.NODE_ENV === "development") console.warn("[category-reels] fresh_category_reels RPC is not installed or its schema cache is stale; using category-safe published-video fallback", { code: error.code });
+      let fallback = supabase.from("videos").select("id,title,description,thumbnail_url,category_id,tags,duration,views,display_view_count,published_at,featured,published,created_at,updated_at,video_url").eq("category_id", category.id).eq("published", true).order("created_at", { ascending: false }).order("id", { ascending: false });
+      if (excludeIds.length) fallback = fallback.not("id", "in", `(${excludeIds.join(",")})`);
+      const start = excludeIds.length ? 0 : (page - 1) * PAGE_SIZE;
+      const result = await fallback.range(start, start + PAGE_SIZE - 1);
+      data = result.data;
+      error = result.error;
+    }
 
     if (error) throw error;
 

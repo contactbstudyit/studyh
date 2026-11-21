@@ -1,4 +1,4 @@
-import { DeleteObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, DeleteObjectsCommand, GetObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomUUID } from "node:crypto";
 
@@ -152,6 +152,34 @@ export async function deleteVideoR2Object(slot: string, key: string) {
   }
   const config = getVideoClient(account);
   await config.client.send(new DeleteObjectCommand({ Bucket: config.bucket, Key: key }));
+}
+
+export async function deleteVideoR2Objects(slot: string, keys: string[]) {
+  const account = getConfiguredVideoR2Account(slot);
+  if (!account) throw new Error("Selected Cloudflare video account slot is not configured");
+  if (!keys.length || keys.length > 1000 || keys.some((key) => !/^videos\/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/[A-Za-z0-9._-]{1,100}$/i.test(key))) {
+    throw new Error("One or more object keys are outside the managed video upload namespace");
+  }
+  const config = getVideoClient(account);
+  const result = await config.client.send(new DeleteObjectsCommand({ Bucket: config.bucket, Delete: { Objects: [...new Set(keys)].map((Key) => ({ Key })), Quiet: false } }));
+  if (result.Errors?.length) throw new Error(`Cloudflare could not delete ${result.Errors.length} selected object(s)`);
+  return result.Deleted?.length ?? 0;
+}
+
+export async function createVideoR2DownloadUrl(slot: string, key: string) {
+  const account = getConfiguredVideoR2Account(slot);
+  if (!account) throw new Error("Selected Cloudflare video account slot is not configured");
+  if (!/^videos\/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/[A-Za-z0-9._-]{1,100}$/i.test(key)) {
+    throw new Error("Object key is outside the managed video upload namespace");
+  }
+  const config = getVideoClient(account);
+  const filename = key.split("/").pop() ?? "video";
+  const command = new GetObjectCommand({
+    Bucket: config.bucket,
+    Key: key,
+    ResponseContentDisposition: `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
+  });
+  return getSignedUrl(config.client as never, command as never, { expiresIn: 300 });
 }
 
 function getConfiguration(): R2Configuration {

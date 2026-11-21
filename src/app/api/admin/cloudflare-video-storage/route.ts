@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getAdminMfaStatus, hasAdminTotpAal2 } from "@/lib/admin-mfa";
-import { deleteVideoR2Object, getVideoR2StorageUsage, listVideoR2Objects, listConfiguredVideoR2Accounts } from "@/lib/r2-storage";
+import { createVideoR2DownloadUrl, deleteVideoR2Objects, getVideoR2StorageUsage, listVideoR2Objects, listConfiguredVideoR2Accounts } from "@/lib/r2-storage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,16 +40,33 @@ export async function GET(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   const auth = await authorizeAdmin();
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status, headers: { "Cache-Control": "no-store" } });
-  let body: { slot?: unknown; key?: unknown };
-  try { body = await request.json() as { slot?: unknown; key?: unknown }; }
+  let body: { slot?: unknown; key?: unknown; keys?: unknown };
+  try { body = await request.json() as { slot?: unknown; key?: unknown; keys?: unknown }; }
   catch { return NextResponse.json({ error: "Invalid object deletion request" }, { status: 400 }); }
-  if (typeof body.slot !== "string" || typeof body.key !== "string") return NextResponse.json({ error: "Select an account and managed video object" }, { status: 400 });
+  const keys = Array.isArray(body.keys) ? body.keys : typeof body.key === "string" ? [body.key] : [];
+  if (typeof body.slot !== "string" || keys.length === 0 || keys.length > 1000 || keys.some((key) => typeof key !== "string")) return NextResponse.json({ error: "Select an account and managed video object(s)" }, { status: 400 });
   if (!listConfiguredVideoR2Accounts().some((account) => account.id === body.slot)) return NextResponse.json({ error: "Unknown Cloudflare account slot" }, { status: 400 });
   try {
-    await deleteVideoR2Object(body.slot, body.key);
-    return NextResponse.json({ deleted: true }, { headers: { "Cache-Control": "no-store" } });
+    const deletedCount = await deleteVideoR2Objects(body.slot, keys as string[]);
+    return NextResponse.json({ deleted: true, deletedCount }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     if (process.env.NODE_ENV === "development") console.error("[admin-video-storage] object deletion failed", { errorType: error instanceof Error ? error.name : "UnknownError" });
     return NextResponse.json({ error: error instanceof Error && error.message.includes("namespace") ? "Only objects created in the managed videos/ area can be deleted here." : "Could not delete the R2 object. Check the bucket DeleteObject permission and retry." }, { status: 502, headers: { "Cache-Control": "no-store" } });
+  }
+}
+
+export async function POST(request: NextRequest) {
+  const auth = await authorizeAdmin();
+  if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status, headers: { "Cache-Control": "no-store" } });
+  let body: { slot?: unknown; keys?: unknown };
+  try { body = await request.json() as { slot?: unknown; keys?: unknown }; }
+  catch { return NextResponse.json({ error: "Invalid download request" }, { status: 400 }); }
+  if (typeof body.slot !== "string" || !listConfiguredVideoR2Accounts().some((account) => account.id === body.slot)) return NextResponse.json({ error: "Select a configured account slot" }, { status: 400 });
+  if (!Array.isArray(body.keys) || body.keys.length === 0 || body.keys.length > 100 || body.keys.some((key) => typeof key !== "string")) return NextResponse.json({ error: "Select 1 to 100 managed video objects" }, { status: 400 });
+  try {
+    const downloads = await Promise.all((body.keys as string[]).map(async (key) => ({ key, url: await createVideoR2DownloadUrl(body.slot as string, key) })));
+    return NextResponse.json({ downloads }, { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error && error.message.includes("namespace") ? "One or more selected objects are not managed video files." : "Could not prepare direct Cloudflare downloads." }, { status: 400, headers: { "Cache-Control": "no-store" } });
   }
 }

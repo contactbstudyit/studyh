@@ -269,6 +269,11 @@ body { background: #000; color: #fff; font-family: var(--font-geist-sans), syste
 .cloudflare-storage-table td { color: #b9b6ae; }
 .cloudflare-storage-table td:first-child { min-width: 240px; overflow-wrap: anywhere; }
 .cloudflare-storage-table td a { color: #c8c3b6; text-decoration: underline; text-underline-offset: 2px; }
+.cloudflare-storage-table th:first-child,.cloudflare-storage-table td:first-child { width: 34px; min-width: 34px; text-align: center; }
+.cloudflare-storage-table input[type=checkbox] { width: 15px; height: 15px; accent-color: #d7c6a3; }
+.cloudflare-storage-selection-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; max-width: 1050px; margin: 0 0 8px; padding: 9px 11px; border: 1px solid var(--line); background: #10100f; color: #aaa79f; font-size: 10px; }
+.cloudflare-storage-selection-bar > div { display: flex; gap: 7px; }
+.cloudflare-storage-selection-bar .secondary-action,.cloudflare-storage-selection-bar .cloudflare-storage-delete { min-height: 32px; }
 .cloudflare-storage-delete { min-height: 30px; padding: 0 9px; border: 1px solid rgba(184,95,85,.45); background: transparent; color: #d2a49e; font-size: 9px; cursor: pointer; }
 .cloudflare-storage-delete:disabled { opacity: .55; cursor: wait; }
 .cloudflare-storage-next { margin-top: 12px; }

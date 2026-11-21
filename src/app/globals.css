@@ -251,15 +251,17 @@ body { background: #000; color: #fff; font-family: var(--font-geist-sans), syste
 .cloudflare-video-account-controls select { flex: 1; min-width: 0; min-height: 42px; }
 .cloudflare-video-account-controls .secondary-action { min-height: 42px; white-space: nowrap; }
 .cloudflare-video-account-picker > small { color: #85827a; font-size: 10px; line-height: 1.5; }
-.cloudflare-storage-toolbar { display: flex; align-items: end; gap: 10px; max-width: 850px; margin-bottom: 18px; }
-.cloudflare-storage-toolbar label { display: grid; flex: 1; gap: 6px; color: #a9a69e; font-size: 9px; letter-spacing: .8px; }
-.cloudflare-storage-toolbar select { width: 100%; min-height: 40px; padding: 8px 10px; border: 1px solid var(--line); background: #090908; color: #eeeae1; font-size: 12px; }
+.dashboard-content .cloudflare-storage-toolbar { display: flex; align-items: end; gap: 10px; width: min(850px,100%); margin: 0 0 18px; }
+.dashboard-content .cloudflare-storage-toolbar label { display: grid; flex: 1; min-width: 0; gap: 6px; color: #a9a69e; font-size: 9px !important; line-height: 1.4; letter-spacing: .8px; }
+.dashboard-content .cloudflare-storage-toolbar label > span { display: block; font-size: 9px !important; line-height: 1.4; }
+.dashboard-content .cloudflare-storage-toolbar select { display: block; width: 100%; min-height: 40px; padding: 8px 10px; border: 1px solid var(--line); background: #090908; color: #eeeae1; font-size: 12px !important; line-height: 1.4; }
 .cloudflare-storage-summary { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); max-width: 1050px; margin-bottom: 18px; border: 1px solid var(--line); background: #10100f; }
 .cloudflare-storage-summary > div { display: grid; align-content: start; gap: 7px; min-width: 0; padding: 15px; border-right: 1px solid var(--line); }
 .cloudflare-storage-summary > div:last-child { border-right: 0; }
 .cloudflare-storage-summary span { color: #8f8c84; font-size: 8px; letter-spacing: 1px; }
 .cloudflare-storage-summary strong { color: #e6e2d9; font-size: 16px; font-weight: 500; overflow-wrap: anywhere; }
-.cloudflare-storage-summary small,.cloudflare-storage-note { color: #85827a; font-size: 9px; line-height: 1.6; overflow-wrap: anywhere; }
+.cloudflare-storage-summary small { color: #85827a; font-size: 9px; line-height: 1.6; overflow-wrap: anywhere; }
+.dashboard-content .cloudflare-storage-note { display: block; width: min(900px,100%); margin: 12px 0 0; color: #85827a; font-size: 10px !important; line-height: 1.6; overflow-wrap: anywhere; white-space: normal; }
 .cloudflare-storage-table-wrap { max-width: 1050px; overflow-x: auto; border: 1px solid var(--line); background: #10100f; }
 .cloudflare-storage-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 10px; }
 .cloudflare-storage-table th,.cloudflare-storage-table td { padding: 10px; border-bottom: 1px solid var(--line); vertical-align: top; }

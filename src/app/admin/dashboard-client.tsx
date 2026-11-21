@@ -188,7 +188,7 @@ export default function AdminDashboard() {
   }, [selectedCloudflareAccountId]);
 
   useEffect(() => {
-    if (section === "Add Video") void refreshCloudflareVideoAccounts();
+    if (section === "Add Video" || section === "Cloudflare Storage") void refreshCloudflareVideoAccounts();
   }, [refreshCloudflareVideoAccounts, section]);
 
   useEffect(() => {

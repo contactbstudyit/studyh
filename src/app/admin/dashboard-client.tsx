@@ -28,6 +28,17 @@ type StagedVideoUpload = { publicUrl: string; storageAccountSlot: string; bucket
 type CloudflareVideoAccount = { id: string; name: string; accountId: string; endpoint: string; bucketName: string; publicUrl: string; isDefault: boolean; isActive: boolean };
 type CloudflareVideoStorageObject = { key: string; size: number; lastModified: string | null; publicUrl: string };
 type CloudflareVideoStorageView = { account: Pick<CloudflareVideoAccount, "id" | "name" | "bucketName" | "publicUrl">; objects: CloudflareVideoStorageObject[]; nextContinuationToken: string | null; usage: { objectCount: number; totalBytes: number } };
+type DuplicateVideoCandidate = Pick<VideoRecord, "id" | "title" | "video_url" | "category_id" | "views" | "created_at" | "thumbnail_url">;
+type DuplicateVideoGroup = { sourceUrl: string; keep: DuplicateVideoCandidate; duplicates: DuplicateVideoCandidate[] };
+
+function normalizeDuplicateVideoUrl(source: string) {
+  try {
+    const url = new URL(source.trim());
+    url.hash = "";
+    url.hostname = url.hostname.toLowerCase();
+    return url.toString();
+  } catch { return source.trim(); }
+}
 
 function formatStorageBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} bytes`;
@@ -111,6 +122,11 @@ export default function AdminDashboard() {
   const [selectedStorageObjectKeys, setSelectedStorageObjectKeys] = useState<Set<string>>(() => new Set());
   const [preparedStorageDownloads, setPreparedStorageDownloads] = useState<Array<{ key: string; url: string }>>([]);
   const [storageBulkActionBusy, setStorageBulkActionBusy] = useState(false);
+  const [duplicateScanBusy, setDuplicateScanBusy] = useState(false);
+  const [duplicateDeleteBusy, setDuplicateDeleteBusy] = useState(false);
+  const [duplicateGroups, setDuplicateGroups] = useState<DuplicateVideoGroup[]>([]);
+  const [selectedDuplicateVideoIds, setSelectedDuplicateVideoIds] = useState<Set<string>>(() => new Set());
+  const [duplicateScanError, setDuplicateScanError] = useState("");
   const cloudflareStorageRequestRef = useRef(0);
   const videoSubmitLock = useRef(false);
   const [generatingThumbnailIds, setGeneratingThumbnailIds] = useState<Set<string>>(() => new Set());
@@ -684,13 +700,14 @@ export default function AdminDashboard() {
       await categoryOptionsHook.refresh();
     } else await categoryOptionsHook.refresh();
   }
-  async function removeVideo(id: string) {
+  async function removeVideo(id: string): Promise<boolean> {
     try {
       const response = await fetch(`/api/admin/videos/${encodeURIComponent(id)}/thumbnail`, { method: "DELETE" });
       if (!response.ok) { const result = await response.json() as { error?: string }; throw new Error(result.error || "Could not clean up the generated thumbnail"); }
       const removed = await videosHook.remove(id);
       if (removed) { await statsHook.refresh(); await categoriesHook.refresh(); }
-    } catch (error) { toast.error(error instanceof Error ? error.message : "Could not delete video and thumbnail."); }
+      return removed;
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Could not delete video and thumbnail."); return false; }
   }
   async function generateThumbnailFor(video: Pick<VideoRecord, "id" | "title" | "video_url" | "duration" | "thumbnail_url">, options: { quiet?: boolean; refreshAfter?: boolean; batchJob?: boolean } = {}) {
     if ((thumbnailBatchLock.current || videoCheckLock.current) && !options.batchJob) return false;
@@ -994,6 +1011,60 @@ export default function AdminDashboard() {
 
   const nav = [{ name: "Dashboard", icon: LayoutDashboard }, { name: "Videos", icon: Film }, { name: "Add Video", icon: Plus }, { name: "Categories", icon: FolderOpen }, { name: "Cloudflare Storage", icon: Cloud }, { name: "Settings", icon: Settings }];
   const mediaMaintenanceRunning = thumbnailBatchRunning || videoCheckRunning || videoCheckLock.current || bulkDeleteBusy;
+
+  async function scanDuplicateVideos() {
+    if (duplicateScanBusy || duplicateDeleteBusy || mediaMaintenanceRunning) return;
+    setDuplicateScanBusy(true);
+    setDuplicateScanError("");
+    setDuplicateGroups([]);
+    setSelectedDuplicateVideoIds(new Set());
+    try {
+      const videos = await videosHook.getVideosForDuplicateScan(categoryFilter || undefined);
+      if (!videos) throw new Error("Could not load videos for the duplicate scan.");
+      const groups = new Map<string, DuplicateVideoCandidate[]>();
+      for (const video of videos) {
+        const normalizedUrl = normalizeDuplicateVideoUrl(video.video_url);
+        if (!normalizedUrl) continue;
+        groups.set(normalizedUrl, [...(groups.get(normalizedUrl) ?? []), video]);
+      }
+      const duplicates: DuplicateVideoGroup[] = [];
+      for (const [sourceUrl, matches] of groups) {
+        if (matches.length < 2) continue;
+        const ordered = [...matches].sort((a, b) => b.views - a.views || a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
+        duplicates.push({ sourceUrl, keep: ordered[0], duplicates: ordered.slice(1) });
+      }
+      setDuplicateGroups(duplicates);
+      setSelectedDuplicateVideoIds(new Set(duplicates.flatMap((group) => group.duplicates.map((video) => video.id))));
+      if (duplicates.length) toast.info(`Found ${duplicates.reduce((count, group) => count + group.duplicates.length, 0)} exact-source duplicates. The highest-view record in each group is kept.`);
+      else toast.success("No exact-source duplicate video URLs found.");
+    } catch (error) {
+      setDuplicateScanError(error instanceof Error ? error.message : "Could not scan for duplicates.");
+    } finally {
+      setDuplicateScanBusy(false);
+    }
+  }
+
+  async function deleteSelectedDuplicateVideos() {
+    const ids = [...selectedDuplicateVideoIds];
+    if (!ids.length || duplicateDeleteBusy || !window.confirm(`Delete ${ids.length} duplicate video record${ids.length === 1 ? "" : "s"}? The highest-view record in each exact-URL group is kept. This removes video records and app-generated thumbnails, but does not delete original R2/external video files.`)) return;
+    setDuplicateDeleteBusy(true);
+    let deleted = 0;
+    const failedIds = new Set<string>();
+    try {
+      for (const id of ids) {
+        const ok = await removeVideo(id);
+        if (ok) deleted++; else failedIds.add(id);
+      }
+      setDuplicateGroups((current) => current.map((group) => ({ ...group, duplicates: group.duplicates.filter((video) => failedIds.has(video.id)) })).filter((group) => group.duplicates.length > 0));
+      setSelectedDuplicateVideoIds(failedIds);
+      await Promise.all([videosHook.refresh(), statsHook.refresh(), categoriesHook.refresh()]);
+      if (failedIds.size) toast.warning(`Deleted ${deleted} duplicate records; ${failedIds.size} failed. Review and retry the remaining items.`);
+      else toast.success(`Deleted ${deleted} duplicate video records. Original video files were preserved.`);
+    } finally {
+      setDuplicateDeleteBusy(false);
+    }
+  }
+
   return <main className="dashboard-shell"><aside className="dashboard-sidebar"><a href="/" className="dash-back"><ArrowLeft size={15}/> Public library</a><div className="dash-kicker"><ShieldCheck size={15}/> ADMIN</div><nav>{nav.map(({ name, icon: Icon }) => <button key={name} className={section === name ? "dash-nav active" : "dash-nav"} onClick={() => navigateSection(name)}><Icon size={16}/>{name}</button>)}</nav><button className="dash-logout" onClick={logout}><LogOut size={15}/> Sign out</button></aside>
     <section className="dashboard-content"><header className="dashboard-top"><span>LIBRARY MANAGEMENT</span><button onClick={logout}><LogOut size={14}/> Sign out</button></header>
        {section === "Dashboard" && <><div className="admin-heading"><div><span className="eyebrow">OVERVIEW</span><h1>Dashboard</h1><p>Your library at a glance.</p></div><button className="button-primary" onClick={() => openVideo()}><Plus size={15}/> Add video</button></div><div className="stats-row"><Stat label="Total videos" value={stats?.total_videos}/><Stat label="Published" value={stats?.published_videos}/><Stat label="Categories" value={stats?.total_categories}/><Stat label="Total views" value={stats?.total_views}/></div>{showDashboardStatsDiagnostics && statsHook.diagnostic && <section className="dashboard-diagnostic" role="alert" aria-live="assertive"><h2>Dashboard statistics failed</h2><p>phase: {statsHook.diagnostic.phase}</p><p>message: {statsHook.diagnostic.message}</p><p>code: {statsHook.diagnostic.code ?? "(none)"}</p><p>details: {statsHook.diagnostic.details ?? "(none)"}</p><p>hint: {statsHook.diagnostic.hint ?? "(none)"}</p></section>}<div className="table-heading"><h2>Recently added</h2><button onClick={() => goToVideos()}>Manage videos <ArrowLeft size={13}/></button></div><VideoTable videos={videosHook.videos.slice(0, 6)} categories={categoriesHook.categories} onEdit={openVideo} onDelete={removeVideo} onToggle={toggleVideo} onGenerateThumbnail={generateThumbnailFor} generatingThumbnailIds={generatingThumbnailIds}/></>}
@@ -1004,6 +1075,7 @@ export default function AdminDashboard() {
               <button className="secondary-action" onClick={generateMissingThumbnails} disabled={mediaMaintenanceRunning}>{thumbnailBatchRunning ? "Generating thumbnails..." : "Generate Missing Thumbnails"}</button>
               <button className="secondary-action" onClick={() => setRegenerateAllConfirmOpen(true)} disabled={mediaMaintenanceRunning}>Regenerate All Thumbnails</button>
               <button className="secondary-action" onClick={() => setCheckAllConfirmOpen(true)} disabled={mediaMaintenanceRunning}>{videoCheckRunning ? "Checking videos..." : "Check All Videos"}</button>
+              <button className="secondary-action" onClick={() => void scanDuplicateVideos()} disabled={duplicateScanBusy || duplicateDeleteBusy || mediaMaintenanceRunning}>{duplicateScanBusy ? "Scanning duplicates…" : "Find Duplicate Videos"}</button>
               <button className="secondary-action delete-category-videos-action" onClick={() => void openDeleteAllInCategory()} disabled={!categoryFilter || mediaMaintenanceRunning} title={categoryFilter ? "Delete every video in the selected category" : "Select a category first"}>Delete All in Category</button>
               <button className="button-primary" onClick={() => openVideo()}><Plus size={15}/> Add video</button>
             </div>
@@ -1015,9 +1087,20 @@ export default function AdminDashboard() {
            <select value={categoryFilter} onChange={(event) => changeVideoCategory(event.target.value)}><option value="">All categories</option>{categoriesHook.categories.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}</select>
            <select value={publishedFilter} onChange={(event) => changeVideoStatus(event.target.value)}><option value="all">All statuses</option><option value="published">Published</option><option value="draft">Unpublished</option></select>
          </div>
-         <VideoTable videos={videosHook.videos} categories={categoriesHook.categories} onEdit={openVideo} onDelete={removeVideo} onToggle={toggleVideo} onGenerateThumbnail={generateThumbnailFor} generatingThumbnailIds={generatingThumbnailIds} onCheckVideo={checkSingleVideo} checkingVideoIds={checkingVideoIds} checkDisabled={mediaMaintenanceRunning}/>
-         <VideoPagination page={videoPage} totalPages={adminTotalPages} loading={videosHook.loading} onPageChange={(page) => goToVideos(page, false)} hideNextOnLast/>
-         {(videoCheckRunning || videoCheckSummary || videoCheckFailure) && <section className="video-check-results" aria-live="polite">
+          <VideoTable videos={videosHook.videos} categories={categoriesHook.categories} onEdit={openVideo} onDelete={removeVideo} onToggle={toggleVideo} onGenerateThumbnail={generateThumbnailFor} generatingThumbnailIds={generatingThumbnailIds} onCheckVideo={checkSingleVideo} checkingVideoIds={checkingVideoIds} checkDisabled={mediaMaintenanceRunning}/>
+          <VideoPagination page={videoPage} totalPages={adminTotalPages} loading={videosHook.loading} onPageChange={(page) => goToVideos(page, false)} hideNextOnLast/>
+          {(duplicateScanBusy || duplicateScanError || duplicateGroups.length > 0) && <section className="duplicate-video-results" aria-live="polite">
+            <div className="duplicate-video-results-heading"><div><h2>{duplicateScanBusy ? "Scanning duplicate sources…" : "Duplicate videos"}</h2><p>Only identical normalized source URLs are grouped. The record with the most views is retained.</p></div><span>{duplicateGroups.reduce((count, group) => count + group.duplicates.length, 0)} duplicates</span></div>
+            {duplicateScanError && <p className="field-error" role="alert">{duplicateScanError}</p>}
+            {duplicateGroups.map((group) => <div className="duplicate-video-group" key={group.sourceUrl}>
+              <p className="duplicate-video-source">Source: {group.sourceUrl.split("?")[0]}</p>
+              <div className="duplicate-video-row kept"><span className="duplicate-video-keep-badge">KEEP</span><div><strong>{group.keep.title}</strong><small>{group.keep.views.toLocaleString()} views · {group.keep.category_id === categoryFilter ? "Selected category" : "Existing record"}</small></div></div>
+              {group.duplicates.map((video) => <label className="duplicate-video-row" key={video.id}><input type="checkbox" checked={selectedDuplicateVideoIds.has(video.id)} disabled={duplicateDeleteBusy} onChange={() => setSelectedDuplicateVideoIds((current) => { const next = new Set(current); if (next.has(video.id)) next.delete(video.id); else next.add(video.id); return next; })}/><div><strong>{video.title}</strong><small>{video.views.toLocaleString()} views · {video.created_at ? new Date(video.created_at).toLocaleDateString() : ""}</small></div><span>Duplicate</span></label>)}
+            </div>)}
+            {!duplicateScanBusy && !duplicateScanError && duplicateGroups.length === 0 && <p className="admin-empty">No duplicate source URLs found in {categoryFilter ? "the selected category" : "the library"}.</p>}
+            {duplicateGroups.length > 0 && <div className="duplicate-video-actions"><span>{selectedDuplicateVideoIds.size} duplicate records selected</span><button className="cloudflare-storage-delete" type="button" disabled={!selectedDuplicateVideoIds.size || duplicateDeleteBusy} onClick={() => void deleteSelectedDuplicateVideos()}>{duplicateDeleteBusy ? "Deleting duplicates…" : "Delete selected duplicates"}</button></div>}
+          </section>}
+          {(videoCheckRunning || videoCheckSummary || videoCheckFailure) && <section className="video-check-results" aria-live="polite">
            <div className="video-check-results-heading"><h2>{videoCheckRunning ? "Video check in progress" : videoCheckFailure ? "Video check stopped" : "Video check complete"}</h2></div>
            {videoCheckSummary && <p className="video-check-summary">{videoCheckSummary.checked} checked<br/>{videoCheckSummary.working} working<br/>{videoCheckSummary.recovered + videoCheckSummary.temporary} temporarily failed/recovered<br/>{videoCheckSummary.unpublished} confirmed broken and unpublished{videoCheckSummary.skipped > 0 && <><br/>{videoCheckSummary.skipped} skipped</>}</p>}
            {videoCheckFailure && <p className="video-check-failure" role="alert">{videoCheckFailure}</p>}

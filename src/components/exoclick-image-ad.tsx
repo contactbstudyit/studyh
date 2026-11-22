@@ -8,9 +8,9 @@ declare global {
   }
 }
 
-export function ExoclickImageAd({ slotId, active, providerReady, providerFailed, onFilled, onNoFill }: {
+export function ExoclickImageAd({ slotId, request, providerReady, providerFailed, onFilled, onNoFill }: {
   slotId: string;
-  active: boolean;
+  request: boolean;
   providerReady: boolean;
   providerFailed: boolean;
   onFilled: (slotId: string) => void;
@@ -25,7 +25,7 @@ export function ExoclickImageAd({ slotId, active, providerReady, providerFailed,
   const [creativeSize, setCreativeSize] = useState<{ width: number; height: number } | null>(null);
 
   useEffect(() => {
-    if (!active || filled) return;
+    if (!request || filled) return;
     if (providerFailed) {
       if (!settledRef.current) { settledRef.current = true; onNoFill(slotId); }
       return;
@@ -36,15 +36,25 @@ export function ExoclickImageAd({ slotId, active, providerReady, providerFailed,
       onNoFill(slotId);
     }, 12000);
     return () => window.clearTimeout(timeout);
-  }, [active, filled, onNoFill, providerFailed, slotId]);
+  }, [filled, onNoFill, providerFailed, request, slotId]);
 
   useEffect(() => {
     const ins = insRef.current;
-    if (!active || providerFailed || !providerReady || !ins || submittedRef.current) return;
+    if (!request || providerFailed || !providerReady || !ins || submittedRef.current) return;
     submittedRef.current = true;
     const startedAt = performance.now();
 
     let observer: MutationObserver | null = null;
+    const failCreative = () => {
+      if (!request) return;
+      if (settledRef.current && filled) {
+        setFilled(false);
+        setCreativeSize(null);
+      }
+      if (settledRef.current && !filled) return;
+      settledRef.current = true;
+      onNoFill(slotId);
+    };
     const detectCreative = () => {
       if (settledRef.current) return;
       const media = ins.querySelector<HTMLElement>("iframe, img, video, object, embed");
@@ -55,12 +65,7 @@ export function ExoclickImageAd({ slotId, active, providerReady, providerFailed,
         for (const eventName of media instanceof HTMLVideoElement ? ["loadedmetadata", "loadeddata", "canplay"] : ["load", "loadeddata"]) {
           media.addEventListener(eventName, markLoaded);
         }
-        media.addEventListener("error", () => {
-          if (!settledRef.current && active) {
-            settledRef.current = true;
-            onNoFill(slotId);
-          }
-        }, { once: true });
+        media.addEventListener("error", failCreative, { once: true });
       }
       const bounds = media.getBoundingClientRect();
       const intrinsicWidth = media instanceof HTMLImageElement ? media.naturalWidth : media instanceof HTMLVideoElement ? media.videoWidth : 0;
@@ -93,7 +98,7 @@ export function ExoclickImageAd({ slotId, active, providerReady, providerFailed,
     }
 
     return () => observer?.disconnect();
-  }, [active, onFilled, onNoFill, providerFailed, providerReady, slotId]);
+  }, [onFilled, onNoFill, providerFailed, providerReady, request, slotId]);
 
   return <div className={`exo-display-frame${filled ? " filled" : ""}`} style={creativeSize ? { width: `${creativeSize.width}px`, height: `${creativeSize.height}px` } : undefined}>
     {!filled && <div className="exo-display-skeleton" aria-hidden="true"/>}

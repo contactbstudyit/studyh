@@ -18,7 +18,7 @@ type PlayerSlot = "a" | "b";
 type PlayerSlots = Record<PlayerSlot, ReelItem | null>;
 type ReelPlaybackStatus = "loading" | "ready" | "error";
 type ReelAudioAvailability = "unknown" | "available" | "none";
-type ReelAdPlacement = { id: string; afterVideoId: string; status: "pending" | "loading" | "served" };
+type ReelAdPlacement = { id: string; afterVideoId: string; status: "pending" | "loading" | "served" | "no-fill"; attempt: number };
 type ReelFeedItem =
   | { kind: "reel"; key: string; feedIndex: number; videoIndex: number; item: ReelItem }
   | { kind: "ad"; key: string; feedIndex: number; ad: ReelAdPlacement };
@@ -61,6 +61,7 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
   const adThresholdReachedAtRef = useRef<number | null>(null);
   const adPlacementSequenceRef = useRef(0);
   const pendingAdIdRef = useRef<string | null>(null);
+  const suppressedFailedAdIdRef = useRef<string | null>(null);
   const slotVideoElementsRef = useRef<Record<PlayerSlot, HTMLVideoElement | null>>({ a: null, b: null });
   const activeVideoElementRef = useRef<HTMLVideoElement | null>(null);
   const pausedReelForAdRef = useRef<{ video: HTMLVideoElement; videoId: string; time: number; muted: boolean; volume: number; wasPlaying: boolean } | null>(null);
@@ -103,15 +104,21 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
     if (paused.wasPlaying) void paused.video.play().catch(() => {});
   }, []);
 
-  const skipAdPlacement = useCallback((adId: string, restoreReel = true) => {
+  const skipAdPlacement = useCallback((adId: string) => {
     const current = adPlacementsRef.current.find((ad) => ad.id === adId);
-    if (!current || current.status === "served") return;
-    updateAdPlacements(adPlacementsRef.current.filter((ad) => ad.id !== adId));
+    if (!current || current.status === "no-fill") return;
+    updateAdPlacements(adPlacementsRef.current.map((ad) => ad.id === adId ? { ...ad, status: "no-fill" } : ad));
     if (pendingAdIdRef.current === adId) pendingAdIdRef.current = null;
     if (activeAdIdRef.current === adId) {
+      suppressedFailedAdIdRef.current = adId;
       activeAdIdRef.current = null;
       setActiveAdId(null);
-      if (restoreReel) restoreReelAfterAd();
+      restoreReelAfterAd();
+      const adElement = trackRef.current?.querySelector<HTMLElement>(`[data-ad-id="${adId}"]`);
+      const adFeedIndex = Number(adElement?.dataset.feedIndex);
+      const nextReel = [...(trackRef.current?.querySelectorAll<HTMLElement>('[data-feed-type="reel"]') ?? [])].find((reel) => Number(reel.dataset.feedIndex) > adFeedIndex);
+      const nextIndex = Number(nextReel?.dataset.reelIndex);
+      if (Number.isInteger(nextIndex) && nextIndex >= 0) trackRef.current?.scrollTo({ top: nextReel?.offsetTop ?? 0, behavior: "instant" });
     }
   }, [restoreReelAfterAd, updateAdPlacements]);
 
@@ -137,7 +144,7 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
     if (!currentVideo) return;
     const id = `exo-display-${++adPlacementSequenceRef.current}`;
     adThresholdReachedAtRef.current = performance.now();
-    const next = [...adPlacementsRef.current, { id, afterVideoId: currentVideo.video.id, status: "pending" as const }];
+    const next = [...adPlacementsRef.current, { id, afterVideoId: currentVideo.video.id, status: "pending" as const, attempt: 0 }];
     updateAdPlacements(next);
     pendingAdIdRef.current = id;
     reelCountSinceAdRef.current = 0;
@@ -152,7 +159,7 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
   }, []);
 
   const activateAd = useCallback((adId: string) => {
-    if (mobileViewport !== true || activeAdIdRef.current === adId) return;
+    if (mobileViewport !== true || activeAdIdRef.current === adId || suppressedFailedAdIdRef.current === adId) return;
     activeAdIdRef.current = adId;
     setActiveAdId(adId);
     const video = activeVideoElementRef.current;
@@ -168,8 +175,9 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
       video.pause();
     }
     const placement = adPlacementsRef.current.find((ad) => ad.id === adId);
-    if (placement?.status === "pending") {
-      updateAdPlacements(adPlacementsRef.current.map((ad) => ad.id === adId ? { ...ad, status: "loading" } : ad));
+    if (placement?.status === "pending" || placement?.status === "no-fill") {
+      pendingAdIdRef.current = adId;
+      updateAdPlacements(adPlacementsRef.current.map((ad) => ad.id === adId ? { ...ad, status: "loading", attempt: ad.attempt + 1 } : ad));
     }
   }, [mobileViewport, updateAdPlacements]);
 
@@ -237,18 +245,15 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
   }, [mobileViewport]);
 
   const activateReelOrLeaveAd = useCallback((index: number) => {
+    suppressedFailedAdIdRef.current = null;
     const leavingAdId = activeAdIdRef.current;
     if (leavingAdId) {
-      const leavingAd = adPlacementsRef.current.find((ad) => ad.id === leavingAdId);
-      if (leavingAd && leavingAd.status !== "served") skipAdPlacement(leavingAdId, false);
-      else {
-        activeAdIdRef.current = null;
-        setActiveAdId(null);
-      }
+      activeAdIdRef.current = null;
+      setActiveAdId(null);
     }
     activateReel(index);
     restoreReelAfterAd();
-  }, [activateReel, restoreReelAfterAd, skipAdPlacement]);
+  }, [activateReel, restoreReelAfterAd]);
 
   const loadPage = useCallback(async (nextPage: number, replace = false) => {
     if (loadingRef.current) return;
@@ -481,12 +486,12 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
               {feedItems.map((feedItem) => {
                 if (feedItem.kind === "ad") {
                   const isActiveAd = activeAdId === feedItem.ad.id;
-                  const keepRendered = isActiveAd || feedItem.ad.status === "served";
+                  const keepRendered = isActiveAd || feedItem.ad.status === "loading" || feedItem.ad.status === "served";
                   return <article className="reel-slide reel-ad-slide" data-feed-index={feedItem.feedIndex} data-feed-type="ad" data-ad-id={feedItem.ad.id} key={feedItem.key} aria-label="Advertisement">
                     <div className="reel-image-ad-card">
                       <span className="reel-image-ad-label">Advertisement</span>
                       {keepRendered
-                        ? <ExoclickImageAd slotId={feedItem.ad.id} active={isActiveAd} providerReady={imageAdProviderReady} providerFailed={imageAdProviderFailed} onFilled={markAdFilled} onNoFill={skipAdPlacement}/>
+                        ? <ExoclickImageAd key={`${feedItem.ad.id}-${feedItem.ad.attempt}`} slotId={feedItem.ad.id} request={feedItem.ad.status === "loading" || feedItem.ad.status === "served"} providerReady={imageAdProviderReady} providerFailed={imageAdProviderFailed} onFilled={markAdFilled} onNoFill={skipAdPlacement}/>
                         : <div className="exo-display-frame" aria-hidden="true"><div className="exo-display-skeleton"/></div>}
                     </div>
                   </article>;

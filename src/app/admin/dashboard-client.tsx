@@ -29,7 +29,7 @@ type CloudflareVideoAccount = { id: string; name: string; accountId: string; end
 type CloudflareVideoStorageObject = { key: string; size: number; lastModified: string | null; publicUrl: string };
 type CloudflareVideoStorageView = { account: Pick<CloudflareVideoAccount, "id" | "name" | "bucketName" | "publicUrl">; objects: CloudflareVideoStorageObject[]; nextContinuationToken: string | null; usage: { objectCount: number; totalBytes: number } };
 type DuplicateVideoCandidate = Pick<VideoRecord, "id" | "title" | "video_url" | "category_id" | "views" | "created_at" | "thumbnail_url">;
-type DuplicateVideoGroup = { sourceUrl: string; keep: DuplicateVideoCandidate; duplicates: DuplicateVideoCandidate[] };
+type DuplicateVideoGroup = { key: string; matchBasis: string; keep: DuplicateVideoCandidate; duplicates: DuplicateVideoCandidate[]; autoDeleteIds: string[] };
 
 function normalizeDuplicateVideoUrl(source: string) {
   try {
@@ -38,6 +38,10 @@ function normalizeDuplicateVideoUrl(source: string) {
     url.hostname = url.hostname.toLowerCase();
     return url.toString();
   } catch { return source.trim(); }
+}
+
+function normalizeDuplicateVideoTitle(title: string) {
+  return title.normalize("NFKC").trim().replace(/\s+/g, " ");
 }
 
 function formatStorageBytes(bytes: number) {
@@ -1021,22 +1025,46 @@ export default function AdminDashboard() {
     try {
       const videos = await videosHook.getVideosForDuplicateScan(categoryFilter || undefined);
       if (!videos) throw new Error("Could not load videos for the duplicate scan.");
-      const groups = new Map<string, DuplicateVideoCandidate[]>();
+      const parents = new Map(videos.map((video) => [video.id, video.id]));
+      const rootOf = (id: string): string => {
+        const parent = parents.get(id) ?? id;
+        if (parent === id) return id;
+        const root = rootOf(parent);
+        parents.set(id, root);
+        return root;
+      };
+      const union = (a: string, b: string) => { const rootA = rootOf(a), rootB = rootOf(b); if (rootA !== rootB) parents.set(rootB, rootA); };
+      const byUrl = new Map<string, string[]>();
+      const byTitle = new Map<string, string[]>();
       for (const video of videos) {
-        const normalizedUrl = normalizeDuplicateVideoUrl(video.video_url);
-        if (!normalizedUrl) continue;
-        groups.set(normalizedUrl, [...(groups.get(normalizedUrl) ?? []), video]);
+        const url = normalizeDuplicateVideoUrl(video.video_url);
+        const title = normalizeDuplicateVideoTitle(video.title);
+        if (url) byUrl.set(url, [...(byUrl.get(url) ?? []), video.id]);
+        if (title) byTitle.set(title, [...(byTitle.get(title) ?? []), video.id]);
+      }
+      for (const matches of [...byUrl.values(), ...byTitle.values()]) {
+        for (let index = 1; index < matches.length; index += 1) union(matches[0], matches[index]);
+      }
+      const components = new Map<string, DuplicateVideoCandidate[]>();
+      for (const video of videos) {
+        const root = rootOf(video.id);
+        components.set(root, [...(components.get(root) ?? []), video]);
       }
       const duplicates: DuplicateVideoGroup[] = [];
-      for (const [sourceUrl, matches] of groups) {
+      for (const [root, matches] of components) {
         if (matches.length < 2) continue;
         const ordered = [...matches].sort((a, b) => b.views - a.views || a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
-        duplicates.push({ sourceUrl, keep: ordered[0], duplicates: ordered.slice(1) });
+        const keep = ordered[0];
+        const sameUrl = new Set(matches.map((video) => normalizeDuplicateVideoUrl(video.video_url))).size < matches.length;
+        const sameTitle = new Set(matches.map((video) => normalizeDuplicateVideoTitle(video.title))).size < matches.length;
+        const keepUrl = normalizeDuplicateVideoUrl(keep.video_url);
+        const autoDeleteIds = ordered.slice(1).filter((video) => normalizeDuplicateVideoUrl(video.video_url) === keepUrl).map((video) => video.id);
+        duplicates.push({ key: root, matchBasis: sameUrl && sameTitle ? "Exact source URL and title matches" : sameUrl ? "Exact source URL matches" : "Exact title matches; review before deleting", keep, duplicates: ordered.slice(1), autoDeleteIds });
       }
       setDuplicateGroups(duplicates);
-      setSelectedDuplicateVideoIds(new Set(duplicates.flatMap((group) => group.duplicates.map((video) => video.id))));
-      if (duplicates.length) toast.info(`Found ${duplicates.reduce((count, group) => count + group.duplicates.length, 0)} exact-source duplicates. The highest-view record in each group is kept.`);
-      else toast.success("No exact-source duplicate video URLs found.");
+      setSelectedDuplicateVideoIds(new Set(duplicates.flatMap((group) => group.autoDeleteIds)));
+      if (duplicates.length) toast.info(`Found ${duplicates.reduce((count, group) => count + group.duplicates.length, 0)} duplicate candidates by exact source URL or exact title. Highest-view records are marked to keep.`);
+      else toast.success("No exact-source URL or exact-title duplicate groups found.");
     } catch (error) {
       setDuplicateScanError(error instanceof Error ? error.message : "Could not scan for duplicates.");
     } finally {
@@ -1046,7 +1074,7 @@ export default function AdminDashboard() {
 
   async function deleteSelectedDuplicateVideos() {
     const ids = [...selectedDuplicateVideoIds];
-    if (!ids.length || duplicateDeleteBusy || !window.confirm(`Delete ${ids.length} duplicate video record${ids.length === 1 ? "" : "s"}? The highest-view record in each exact-URL group is kept. This removes video records and app-generated thumbnails, but does not delete original R2/external video files.`)) return;
+    if (!ids.length || duplicateDeleteBusy || !window.confirm(`Delete ${ids.length} selected duplicate video record${ids.length === 1 ? "" : "s"}? The highest-view record in each match group is kept. This removes video records and app-generated thumbnails, but does not delete original R2/external video files.`)) return;
     setDuplicateDeleteBusy(true);
     let deleted = 0;
     const failedIds = new Set<string>();
@@ -1090,10 +1118,11 @@ export default function AdminDashboard() {
           <VideoTable videos={videosHook.videos} categories={categoriesHook.categories} onEdit={openVideo} onDelete={removeVideo} onToggle={toggleVideo} onGenerateThumbnail={generateThumbnailFor} generatingThumbnailIds={generatingThumbnailIds} onCheckVideo={checkSingleVideo} checkingVideoIds={checkingVideoIds} checkDisabled={mediaMaintenanceRunning}/>
           <VideoPagination page={videoPage} totalPages={adminTotalPages} loading={videosHook.loading} onPageChange={(page) => goToVideos(page, false)} hideNextOnLast/>
           {(duplicateScanBusy || duplicateScanError || duplicateGroups.length > 0) && <section className="duplicate-video-results" aria-live="polite">
-            <div className="duplicate-video-results-heading"><div><h2>{duplicateScanBusy ? "Scanning duplicate sources…" : "Duplicate videos"}</h2><p>Only identical normalized source URLs are grouped. The record with the most views is retained.</p></div><span>{duplicateGroups.reduce((count, group) => count + group.duplicates.length, 0)} duplicates</span></div>
+            <div className="duplicate-video-results-heading"><div><h2>{duplicateScanBusy ? "Scanning duplicate sources…" : "Duplicate videos"}</h2><p>Exact normalized source URLs and exact normalized titles are matched. Highest-view record is kept; title-only matches are not preselected, so review them carefully.</p></div><span>{duplicateGroups.reduce((count, group) => count + group.duplicates.length, 0)} candidates</span></div>
             {duplicateScanError && <p className="field-error" role="alert">{duplicateScanError}</p>}
-            {duplicateGroups.map((group) => <div className="duplicate-video-group" key={group.sourceUrl}>
-              <p className="duplicate-video-source">Source: {group.sourceUrl.split("?")[0]}</p>
+            {duplicateGroups.map((group) => <div className="duplicate-video-group" key={group.key}>
+              <p className="duplicate-video-source">{group.matchBasis}</p>
+              <p className="duplicate-video-source">Source: {normalizeDuplicateVideoUrl(group.keep.video_url).split("?")[0]}</p>
               <div className="duplicate-video-row kept"><span className="duplicate-video-keep-badge">KEEP</span><div><strong>{group.keep.title}</strong><small>{group.keep.views.toLocaleString()} views · {group.keep.category_id === categoryFilter ? "Selected category" : "Existing record"}</small></div></div>
               {group.duplicates.map((video) => <label className="duplicate-video-row" key={video.id}><input type="checkbox" checked={selectedDuplicateVideoIds.has(video.id)} disabled={duplicateDeleteBusy} onChange={() => setSelectedDuplicateVideoIds((current) => { const next = new Set(current); if (next.has(video.id)) next.delete(video.id); else next.add(video.id); return next; })}/><div><strong>{video.title}</strong><small>{video.views.toLocaleString()} views · {video.created_at ? new Date(video.created_at).toLocaleDateString() : ""}</small></div><span>Duplicate</span></label>)}
             </div>)}

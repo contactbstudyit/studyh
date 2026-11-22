@@ -544,7 +544,7 @@ nextjs-portal {
   .reels-track { position: absolute; z-index: 1; inset: 0; width: 100%; height: 100%; }
   .reel-slide { width: 100%; height: 100%; min-height: 100%; padding: 0; }
   .reel-ad-slide { background: #050505; }
-  .reel-image-ad-card { display: flex; width: 100%; height: 100%; flex-direction: column; align-items: center; justify-content: center; padding: 0 16px calc(68px + env(safe-area-inset-bottom,0px)); background: #050505; }
+  .reel-image-ad-card { display: flex; width: 100%; height: 100%; flex-direction: column; align-items: center; justify-content: center; padding: 0 16px env(safe-area-inset-bottom,0px); background: #050505; }
   .reel-image-ad-label { margin: 0 0 10px; color: rgba(255,255,255,.74); font-size: 10px; letter-spacing: .5px; }
   .exo-display-frame { position: relative; display: grid; flex: 0 0 250px; width: 300px; height: 250px; max-width: 100%; place-items: center; overflow: hidden; background: #111; }
   .exo-display-frame ins.eas6a97888e10 { display: block; width: 300px; height: 250px; max-width: 100%; margin: 0 auto; }
@@ -553,10 +553,10 @@ nextjs-portal {
   @keyframes exo-ad-shimmer { to { background-position-x: -200%; } }
   @media (prefers-reduced-motion: reduce) { .exo-display-skeleton { animation: none; } }
   .reel-card { position: relative; display: block; width: 100%; height: 100%; max-height: none; overflow: hidden; }
-  .reel-media { position: absolute; z-index: 0; top: 0; right: 0; bottom: calc(68px + env(safe-area-inset-bottom,0px)); left: 0; width: 100%; height: auto; border: 0; border-radius: 0; }
+  .reel-media { position: absolute; z-index: 0; inset: 0; width: 100%; height: auto; border: 0; border-radius: 0; }
   .reel-media .player-frame { position: absolute; inset: 0; width: 100%; height: 100%; max-height: none; aspect-ratio: auto; overflow: hidden; border-radius: 0; }
   .reels-player-layer { position: absolute; z-index: 2; top: 0; left: 0; width: 100%; pointer-events: none; }
-  .reel-player-slot { position: absolute; right: 0; left: 0; height: calc(100dvh - 68px - env(safe-area-inset-bottom,0px)); pointer-events: none; }
+  .reel-player-slot { position: absolute; right: 0; left: 0; height: 100dvh; pointer-events: none; }
   .reel-player-slot.active { z-index: 1; }
   .reel-player-slot.preparing { z-index: 0; }
   .reel-player-slot.active .video-bottom-controls { pointer-events: auto; touch-action: manipulation; }
@@ -581,10 +581,10 @@ nextjs-portal {
   .reels-player-layer .player-frame video[data-reel-orientation="landscape"] { object-fit: contain; }
   .reel-player-slot.active::after { position: absolute; z-index: 1; right: 0; bottom: 0; left: 0; height: 38vh; background: linear-gradient(180deg,transparent 0%,rgba(0,0,0,.22) 32%,rgba(0,0,0,.8) 100%); content: ""; pointer-events: none; }
   .reels-track .reel-caption { display: none; }
-  .reels-player-layer .mobile-reel-caption { position: absolute; z-index: 2; right: 16px; bottom: 0; left: 16px; display: block; padding: 0; }
+  .reels-player-layer .mobile-reel-caption { position: absolute; z-index: 2; right: 16px; bottom: calc(68px + env(safe-area-inset-bottom,0px)); left: 16px; display: block; padding: 0; }
   .reel-media .player-frame video { object-fit: cover; }
   .reel-media .player-frame video[data-reel-orientation="landscape"] { object-fit: contain; }
-  .reel-card::after { position: absolute; z-index: 1; right: 0; bottom: calc(68px + env(safe-area-inset-bottom,0px)); left: 0; height: 38vh; background: linear-gradient(180deg,transparent 0%,rgba(0,0,0,.22) 32%,rgba(0,0,0,.8) 100%); content: ""; pointer-events: none; }
+  .reel-card::after { position: absolute; z-index: 1; right: 0; bottom: 0; left: 0; height: 38vh; background: linear-gradient(180deg,transparent 0%,rgba(0,0,0,.22) 32%,rgba(0,0,0,.8) 100%); content: ""; pointer-events: none; }
   .reel-poster-wrap { position: absolute; inset: 0; width: 100%; height: 100%; }
   .reel-poster { object-fit: cover; }
   .reel-poster-play { display: none; }

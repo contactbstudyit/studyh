@@ -6,7 +6,6 @@ import Link from "next/link";
 import Script from "next/script";
 import { VideoPlayer } from "@/components/video-player";
 import { ExoclickImageAd } from "@/components/exoclick-image-ad";
-import MobileBottomNavigation from "@/components/mobile-bottom-navigation";
 import type { VideoRecord } from "@/hooks/use-library";
 import PublicViewCount from "@/components/public-view-count";
 import type { VideoSourceType } from "@/lib/video-playback";
@@ -431,8 +430,6 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
       <Link className="reels-back" href={`/category/${encodeURIComponent(slug)}`} aria-label={`Back to ${categoryName} videos`}><ArrowLeft size={17}/></Link>
       <span className="reels-header-label"><Clapperboard size={14}/> Reels</span>
     </header>
-    <MobileBottomNavigation slug={slug} context="reels"/>
-
     {loading && videos.length === 0 ? <div className="reels-loading" role="status" aria-label={`Loading ${categoryName} reels`}><span className="spinner"/><span>Loading reels...</span></div>
       : error && videos.length === 0 ? <section className="reels-empty" role="alert"><strong>Could not load reels</strong><span>{error}</span><button className="button-secondary" type="button" onClick={() => void loadPage(1, true)}>Try again</button></section>
         : videos.length === 0 ? <section className="reels-empty"><Clapperboard size={22}/><strong>No videos in this category yet</strong><span>Check back later for new reels.</span><Link href={`/category/${encodeURIComponent(slug)}`}>Back to category</Link></section>

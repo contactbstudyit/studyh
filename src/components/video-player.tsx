@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
-import { Command, Film, Maximize, Pause, PictureInPicture2, Play, Volume2, VolumeX } from "lucide-react";
+import { Command, Film, Maximize, Pause, Play, Volume2, VolumeX } from "lucide-react";
 import { recordPublicVideoView } from "@/hooks/use-library";
 import type { VideoRecord } from "@/hooks/use-library";
 import { getPlaybackFailureReason, probeVideoSource, supportsNativeHls } from "@/lib/video-playback";
@@ -431,15 +431,6 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
     } catch { /* Fullscreen may be unavailable or denied by the browser. */ }
   }
 
-  async function requestPlayerPictureInPicture() {
-    const element = videoRef.current as (HTMLVideoElement & { requestPictureInPicture?: () => Promise<PictureInPictureWindow> }) | null;
-    if (!element?.requestPictureInPicture) return;
-    try {
-      if (document.pictureInPictureElement === element) await document.exitPictureInPicture();
-      else await element.requestPictureInPicture();
-    } catch { /* Picture-in-Picture may be unavailable or denied by the browser. */ }
-  }
-
   const remainingTime = Math.max(0, mediaDuration - mediaTime);
   const progressPercent = mediaDuration > 0 ? Math.min(100, Math.max(0, (mediaTime / mediaDuration) * 100)) : 0;
   const diagnosticLines = [`Source: ${sourceHost}`, `Format: ${sourceType.toUpperCase()}`, diagnostics.hlsStatus !== null ? `HTTP status: ${diagnostics.hlsStatus}` : null, diagnostics.hlsType ? `Player category: ${diagnostics.hlsType}` : null];
@@ -463,7 +454,6 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
         <button className="video-control-button video-speed-button" type="button" aria-label={`Playback speed ${mediaPlaybackRate}x`} onClick={cycleMediaPlaybackRate}>{mediaPlaybackRate}x</button>
         <button className="video-control-button" type="button" aria-label={mediaMuted || mediaVolume === 0 ? "Unmute video" : "Mute video"} onClick={toggleMediaMute}>{mediaMuted || mediaVolume === 0 ? <VolumeX size={23}/> : <Volume2 size={23}/>}</button>
         <button className="video-control-button" type="button" aria-label="Toggle fullscreen" onClick={() => void requestPlayerFullscreen()}><Maximize size={22}/></button>
-        {typeof document !== "undefined" && "pictureInPictureEnabled" in document && document.pictureInPictureEnabled && <button className="video-control-button" type="button" aria-label="Picture in picture" onClick={() => void requestPlayerPictureInPicture()}><PictureInPicture2 size={22}/></button>}
       </div>
     </div>}
     {loading && !failure && loadingPresentation === "spinner" && <div className="player-loading"><span className="spinner"/><span>Loading video...</span></div>}

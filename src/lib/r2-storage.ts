@@ -166,6 +166,26 @@ export async function deleteVideoR2Objects(slot: string, keys: string[]) {
   return result.Deleted?.length ?? 0;
 }
 
+export async function deleteManagedVideoObjectForRecord(slot: string, bucketName: string, sourceUrl: string) {
+  const account = getConfiguredVideoR2Account(slot);
+  if (!account || account.bucketName !== bucketName) return { deleted: false, reason: "storage-account-unavailable" as const };
+  let source: URL;
+  const base = new URL(account.publicUrl);
+  try { source = new URL(sourceUrl); } catch { return { deleted: false, reason: "not-managed-r2-url" as const }; }
+  const basePath = base.pathname.replace(/\/+$/, "");
+  if (source.protocol !== "https:" || source.origin !== base.origin || source.search || source.hash || !source.pathname.startsWith(`${basePath}/`)) {
+    return { deleted: false, reason: "not-managed-r2-url" as const };
+  }
+  let suffix: string;
+  try { suffix = source.pathname.slice(basePath.length + 1).split("/").map((part) => decodeURIComponent(part)).join("/"); }
+  catch { return { deleted: false, reason: "invalid-object-path" as const }; }
+  if (!/^videos\/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/[A-Za-z0-9._-]{1,100}$/i.test(suffix)) {
+    return { deleted: false, reason: "outside-managed-upload-prefix" as const };
+  }
+  await deleteVideoR2Object(slot, suffix);
+  return { deleted: true as const, reason: "deleted" as const };
+}
+
 export async function createVideoR2DownloadUrl(slot: string, key: string) {
   const account = getConfiguredVideoR2Account(slot);
   if (!account) throw new Error("Selected Cloudflare video account slot is not configured");

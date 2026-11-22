@@ -1063,7 +1063,7 @@ export default function AdminDashboard() {
       const duplicateIds = duplicates.flatMap((group) => group.duplicates.map((video) => video.id));
       setSelectedDuplicateVideoIds(new Set(duplicateIds));
       if (duplicates.length) {
-        const confirmed = window.confirm(`Found ${duplicateIds.length} duplicate video records by exact source URL or exact title. The highest-view video in each match group will be kept. Delete the other records and their generated thumbnails now? Original video files will remain in storage.`);
+        const confirmed = window.confirm(`Found ${duplicateIds.length} duplicate video records by exact source URL or exact title. The highest-view video in each match group will be kept. Delete the other records now? Their thumbnails will be preserved. Dedicated R2 files are deleted only when not shared; external and shared files remain.`);
         if (confirmed) await deleteSelectedDuplicateVideos(duplicateIds, true);
         else toast.info("Duplicate candidates are listed below. Review the selection and confirm deletion when ready.");
       }
@@ -1077,20 +1077,30 @@ export default function AdminDashboard() {
 
   async function deleteSelectedDuplicateVideos(confirmedIds?: string[], alreadyConfirmed = false) {
     const ids = confirmedIds ?? [...selectedDuplicateVideoIds];
-    if (!ids.length || duplicateDeleteBusy || (!alreadyConfirmed && !window.confirm(`Delete ${ids.length} selected duplicate video record${ids.length === 1 ? "" : "s"}? Kept records remain. This removes video records and app-generated thumbnails, but does not delete original R2/external video files.`))) return;
+    if (!ids.length || duplicateDeleteBusy || (!alreadyConfirmed && !window.confirm(`Delete ${ids.length} selected duplicate video record${ids.length === 1 ? "" : "s"}? Kept records, thumbnails, and any shared source file remain. Dedicated managed R2 video files for deleted records are removed.`))) return;
     setDuplicateDeleteBusy(true);
     let deleted = 0;
+    let storageDeleted = 0;
+    let storageRetained = 0;
     const failedIds = new Set<string>();
     try {
       for (const id of ids) {
-        const ok = await removeVideo(id);
-        if (ok) deleted++; else failedIds.add(id);
+        try {
+          const response = await fetch(`/api/admin/videos/${encodeURIComponent(id)}/delete-duplicate`, { method: "DELETE" });
+          const result = await response.json() as { deleted?: boolean; storageDeleted?: boolean; storageNote?: string; error?: string };
+          if (!response.ok || !result.deleted) throw new Error(result.error || "Delete failed");
+          deleted++;
+          if (result.storageDeleted) storageDeleted++; else storageRetained++;
+        } catch (error) {
+          failedIds.add(id);
+          toast.error(`Could not delete ${duplicateGroups.flatMap((group) => group.duplicates).find((video) => video.id === id)?.title ?? "duplicate video"}: ${error instanceof Error ? error.message : "request failed"}`);
+        }
       }
       setDuplicateGroups((current) => current.map((group) => ({ ...group, duplicates: group.duplicates.filter((video) => failedIds.has(video.id)) })).filter((group) => group.duplicates.length > 0));
       setSelectedDuplicateVideoIds(failedIds);
       await Promise.all([videosHook.refresh(), statsHook.refresh(), categoriesHook.refresh()]);
       if (failedIds.size) toast.warning(`Deleted ${deleted} duplicate records; ${failedIds.size} failed. Review and retry the remaining items.`);
-      else toast.success(`Deleted ${deleted} duplicate video records. Original video files were preserved.`);
+      else toast.success(`Deleted ${deleted} duplicate records; ${storageDeleted} dedicated R2 video files deleted, ${storageRetained} shared, external, or legacy files retained. Thumbnails were preserved.`);
     } finally {
       setDuplicateDeleteBusy(false);
     }

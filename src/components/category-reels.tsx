@@ -46,6 +46,7 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
   const [adPlacements, setAdPlacements] = useState<ReelAdPlacement[]>([]);
   const [activeAdId, setActiveAdId] = useState<string | null>(null);
   const [imageAdProviderReady, setImageAdProviderReady] = useState(false);
+  const [imageAdProviderFailed, setImageAdProviderFailed] = useState(false);
   const trackRef = useRef<HTMLDivElement>(null);
   const loadingRef = useRef(false);
   const videosRef = useRef(videos);
@@ -57,6 +58,7 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
   const countedReelIdsRef = useRef(new Set<string>());
   const reelCountSinceAdRef = useRef(0);
   const nextAdThresholdRef = useRef(3 + Math.floor(Math.random() * 3));
+  const adThresholdReachedAtRef = useRef<number | null>(null);
   const adPlacementSequenceRef = useRef(0);
   const pendingAdIdRef = useRef<string | null>(null);
   const slotVideoElementsRef = useRef<Record<PlayerSlot, HTMLVideoElement | null>>({ a: null, b: null });
@@ -134,6 +136,7 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
     const currentVideo = videosRef.current[Math.max(videoIndex, activeIndexRef.current)] ?? videosRef.current[videoIndex];
     if (!currentVideo) return;
     const id = `exo-display-${++adPlacementSequenceRef.current}`;
+    adThresholdReachedAtRef.current = performance.now();
     const next = [...adPlacementsRef.current, { id, afterVideoId: currentVideo.video.id, status: "pending" as const }];
     updateAdPlacements(next);
     pendingAdIdRef.current = id;
@@ -455,7 +458,26 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
       : error && videos.length === 0 ? <section className="reels-empty" role="alert"><strong>Could not load reels</strong><span>{error}</span><button className="button-secondary" type="button" onClick={() => void loadPage(1, true)}>Try again</button></section>
         : videos.length === 0 ? <section className="reels-empty"><Clapperboard size={22}/><strong>No videos in this category yet</strong><span>Check back later for new reels.</span><Link href={`/category/${encodeURIComponent(slug)}`}>Back to category</Link></section>
             : <div className="reels-track" ref={trackRef} aria-label={`${categoryName} reels`}>
-              {mobileViewport === true && activeAdId && <Script id="exoclick-display-zone-6047522" src="https://a.magsrv.com/ad-provider.js" async type="application/javascript" strategy="afterInteractive" onReady={() => setImageAdProviderReady(true)} onError={() => skipAdPlacement(activeAdId)}/>}
+              {mobileViewport === true && adPlacements.length > 0 && <link rel="preconnect" href="https://a.magsrv.com" crossOrigin="anonymous"/>}
+              {mobileViewport === true && adPlacements.length > 0 && <Script
+                id="exoclick-display-zone-6047522"
+                src="https://a.magsrv.com/ad-provider.js"
+                async
+                type="application/javascript"
+                strategy="afterInteractive"
+                onReady={() => {
+                  setImageAdProviderReady(true);
+                  setImageAdProviderFailed(false);
+                  if (process.env.NODE_ENV === "development" && adThresholdReachedAtRef.current !== null) {
+                    console.info("[reel-display-ad] provider SDK ready", { elapsedMs: Math.round(performance.now() - adThresholdReachedAtRef.current) });
+                  }
+                }}
+                onError={() => {
+                  setImageAdProviderFailed(true);
+                  const pendingId = pendingAdIdRef.current;
+                  if (pendingId) skipAdPlacement(pendingId);
+                }}
+              />}
               {feedItems.map((feedItem) => {
                 if (feedItem.kind === "ad") {
                   const isActiveAd = activeAdId === feedItem.ad.id;
@@ -464,7 +486,7 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
                     <div className="reel-image-ad-card">
                       <span className="reel-image-ad-label">Advertisement</span>
                       {keepRendered
-                        ? <ExoclickImageAd slotId={feedItem.ad.id} active={isActiveAd} providerReady={imageAdProviderReady} onFilled={markAdFilled} onNoFill={skipAdPlacement}/>
+                        ? <ExoclickImageAd slotId={feedItem.ad.id} active={isActiveAd} providerReady={imageAdProviderReady} providerFailed={imageAdProviderFailed} onFilled={markAdFilled} onNoFill={skipAdPlacement}/>
                         : <div className="exo-display-frame" aria-hidden="true"><div className="exo-display-skeleton"/></div>}
                     </div>
                   </article>;

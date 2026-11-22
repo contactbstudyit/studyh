@@ -11,6 +11,7 @@ import type { SourceProbe, VideoSourceType } from "@/lib/video-playback";
 type WatchVideo = Omit<VideoRecord, "video_url" | "views" | "display_view_count" | "published_at">;
 type PlaybackStatus = "loading" | "ready" | "error";
 export type ReelAudioAvailability = "unknown" | "available" | "none";
+const MAX_REEL_WARMUP_PLAYBACK_SECONDS = 1.25;
 
 function detectNativeAudioAvailability(element: HTMLVideoElement): ReelAudioAvailability {
   const media = element as HTMLVideoElement & { audioTracks?: { length: number }; mozHasAudio?: boolean; webkitAudioDecodedByteCount?: number };
@@ -21,7 +22,7 @@ function detectNativeAudioAvailability(element: HTMLVideoElement): ReelAudioAvai
   return "unknown";
 }
 
-export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onViewCounted, onPlaybackStarted, onPlaybackStatusChange, onAudioAvailabilityChange, loadingPresentation = "spinner", muted = false, reelAudio = false, controls = true, reelControls = false, preloadOnly = false, autoPlay, onVideoElement, playerOverlay }: {
+export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onViewCounted, onPlaybackStarted, onPlaybackStatusChange, onAudioAvailabilityChange, loadingPresentation = "spinner", muted = false, reelAudio = false, controls = true, reelControls = false, preloadOnly = false, warmPreload = true, preloadTargetSeconds = 4, autoPlay, onVideoElement, playerOverlay }: {
   video: WatchVideo;
   playbackUrl: string;
   playbackType: VideoSourceType;
@@ -36,6 +37,8 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
   controls?: boolean;
   reelControls?: boolean;
   preloadOnly?: boolean;
+  warmPreload?: boolean;
+  preloadTargetSeconds?: number;
   autoPlay?: boolean;
   onVideoElement?: (element: HTMLVideoElement | null) => void;
   playerOverlay?: ReactNode;
@@ -58,6 +61,11 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
   const preloadOnlyRef = useRef(preloadOnly);
   const previousPreloadModeRef = useRef(preloadOnly);
   const preloadWarmStartedRef = useRef(false);
+  const preloadWarmCompletedRef = useRef(false);
+  const preloadWarmTimeoutRef = useRef<number | null>(null);
+  const warmPreloadRef = useRef(warmPreload);
+  const previousWarmPreloadRef = useRef(warmPreload);
+  const preloadTargetSecondsRef = useRef(preloadTargetSeconds);
   const playbackStatusCallbackRef = useRef(onPlaybackStatusChange);
   const playbackStartedCallbackRef = useRef(onPlaybackStarted);
   const audioAvailabilityCallbackRef = useRef(onAudioAvailabilityChange);
@@ -78,6 +86,8 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
     onVideoElement?.(element);
   }, [onVideoElement]);
   preloadOnlyRef.current = preloadOnly;
+  warmPreloadRef.current = warmPreload;
+  preloadTargetSecondsRef.current = preloadTargetSeconds;
   playbackStatusCallbackRef.current = onPlaybackStatusChange;
   playbackStartedCallbackRef.current = onPlaybackStarted;
   audioAvailabilityCallbackRef.current = onAudioAvailabilityChange;
@@ -96,6 +106,9 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
     const lifecycle = { attachMediaCalled: false, mediaAttached: false, manifestLoading: false, manifestLoaded: false, manifestParsed: false, fragLoading: false, fragLoaded: false };
     playbackReportedRef.current = false;
     preloadWarmStartedRef.current = false;
+    preloadWarmCompletedRef.current = false;
+    if (preloadWarmTimeoutRef.current !== null) window.clearTimeout(preloadWarmTimeoutRef.current);
+    preloadWarmTimeoutRef.current = null;
     autoplayMutedRef.current = false;
     activePlayAttemptRef.current = false;
     playbackAttemptIdRef.current += 1;
@@ -162,17 +175,26 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
             if (!supported) { fail({ type: "unsupported", details: "hls.js reports MediaSource is unsupported in this browser", status: null }); return; }
             if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
             const defaultBufferConfig = HlsPlayer.DefaultConfig;
+            const reelActiveBuffers = reelAudio
+              ? { maxBufferLength: 12, maxMaxBufferLength: 15, maxBufferSize: 24 * 1024 * 1024, backBufferLength: 12, startFragPrefetch: false }
+              : {
+                  maxBufferLength: defaultBufferConfig.maxBufferLength,
+                  maxMaxBufferLength: defaultBufferConfig.maxMaxBufferLength,
+                  maxBufferSize: defaultBufferConfig.maxBufferSize,
+                  backBufferLength: defaultBufferConfig.backBufferLength,
+                  startFragPrefetch: defaultBufferConfig.startFragPrefetch,
+                };
             hlsBufferDefaultsRef.current = {
-              maxBufferLength: defaultBufferConfig.maxBufferLength,
-              maxMaxBufferLength: defaultBufferConfig.maxMaxBufferLength,
-              maxBufferSize: defaultBufferConfig.maxBufferSize,
-              backBufferLength: defaultBufferConfig.backBufferLength,
-              startFragPrefetch: defaultBufferConfig.startFragPrefetch,
+              ...reelActiveBuffers,
             };
             const hls = new HlsPlayer({
               enableWorker: true,
               lowLatencyMode: false,
-              ...(preloadOnly ? { maxBufferLength: 2, maxMaxBufferLength: 3, maxBufferSize: 4 * 1024 * 1024, backBufferLength: 0, startFragPrefetch: true } : {}),
+              ...(reelAudio ? (preloadOnly
+                ? warmPreload
+                  ? { autoStartLoad: true, maxBufferLength: preloadTargetSeconds, maxMaxBufferLength: preloadTargetSeconds + 1, maxBufferSize: 8 * 1024 * 1024, backBufferLength: 0, startFragPrefetch: true }
+                  : { autoStartLoad: false, startFragPrefetch: false }
+                : { ...reelActiveBuffers, autoStartLoad: true }) : {}),
             });
             hlsRef.current = hls; hlsManagedRef.current = true;
             hls.on(HlsPlayer.Events.MEDIA_ATTACHED, () => { lifecycle.mediaAttached = true; if (process.env.NODE_ENV === "development") console.info("[HLS MEDIA_ATTACHED]", { sourceHost, attached: true }); });
@@ -205,19 +227,25 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
         fail({ type: "player initialization", details, status: null });
       }
     })();
-    return () => { active = false; hlsManagedRef.current = false; hlsRef.current?.destroy(); hlsRef.current = null; dash?.reset(); element.pause(); element.removeAttribute("src"); element.load(); };
+    return () => { active = false; if (preloadWarmTimeoutRef.current !== null) window.clearTimeout(preloadWarmTimeoutRef.current); preloadWarmTimeoutRef.current = null; hlsManagedRef.current = false; hlsRef.current?.destroy(); hlsRef.current = null; dash?.reset(); element.pause(); element.removeAttribute("src"); element.load(); };
   }, [playbackUrl, playbackType, sourceHost, attempt, allowAutomaticPlayback, shouldAutoplay]);
 
   useEffect(() => {
     const wasPreloading = previousPreloadModeRef.current;
     previousPreloadModeRef.current = preloadOnly;
-    if (wasPreloading === preloadOnly) return;
+    const wasWarmPreload = previousWarmPreloadRef.current;
+    previousWarmPreloadRef.current = warmPreload;
+    if (wasPreloading === preloadOnly && wasWarmPreload === warmPreload) return;
     const element = videoRef.current;
     if (!element) return;
 
     const hls = hlsRef.current;
     const defaults = hlsBufferDefaultsRef.current;
     if (preloadOnly) {
+      if (preloadWarmTimeoutRef.current !== null) window.clearTimeout(preloadWarmTimeoutRef.current);
+      preloadWarmTimeoutRef.current = null;
+      preloadWarmStartedRef.current = false;
+      preloadWarmCompletedRef.current = false;
       playbackAttemptIdRef.current += 1;
       activePlayAttemptRef.current = false;
       autoplayMutedRef.current = false;
@@ -227,18 +255,23 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
       element.volume = 0;
       try { element.currentTime = 0; } catch { /* The media may not be seekable until its first range arrives. */ }
       if (hls) {
-        hls.config.maxBufferLength = 2;
-        hls.config.maxMaxBufferLength = 3;
-        hls.config.maxBufferSize = 4 * 1024 * 1024;
+        hls.config.maxBufferLength = warmPreload ? preloadTargetSeconds : defaults?.maxBufferLength ?? 30;
+        hls.config.maxMaxBufferLength = warmPreload ? preloadTargetSeconds + 1 : defaults?.maxMaxBufferLength ?? 30;
+        hls.config.maxBufferSize = warmPreload ? 8 * 1024 * 1024 : defaults?.maxBufferSize ?? 24 * 1024 * 1024;
         hls.config.backBufferLength = 0;
-        hls.config.startFragPrefetch = true;
-        hls.stopLoad();
-        hls.startLoad(-1);
+        hls.config.startFragPrefetch = warmPreload;
+        if (warmPreload) hls.startLoad(-1); else hls.stopLoad();
       }
       setLoading(false);
       preloadWarmStartedRef.current = false;
-      startSilentWarm(element);
+      if (warmPreload) startSilentWarm(element);
       return;
+    }
+
+    if (wasPreloading && reelAudio && element.currentTime > 0.25 && element.buffered.length > 0) {
+      try {
+        if (element.buffered.start(0) <= 0.05 && element.buffered.end(0) >= element.currentTime) element.currentTime = 0;
+      } catch { /* Keep the warmed position if seeking back to a buffered frame is unsupported. */ }
     }
 
     if (hls && defaults) {
@@ -262,7 +295,7 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
     setLoading(!ready);
     playbackStatusCallbackRef.current?.(video.id, ready ? "ready" : "loading");
     startActivePlayback(element);
-  }, [preloadOnly]);
+  }, [preloadOnly, warmPreload, preloadTargetSeconds]);
 
   function hasPlayableMedia(element: HTMLVideoElement) {
     const buffered = element.buffered.length > 0 && element.buffered.end(element.buffered.length - 1) - element.currentTime > 0.15;
@@ -279,6 +312,31 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
     if (hlsManagedRef.current) return;
     const status = detectNativeAudioAvailability(element);
     if (status !== "unknown") publishAudioAvailability(status);
+  }
+
+  function bufferedAheadSeconds(element: HTMLVideoElement) {
+    const time = element.currentTime;
+    for (let index = 0; index < element.buffered.length; index += 1) {
+      const start = element.buffered.start(index);
+      const end = element.buffered.end(index);
+      if (start <= time + 0.15 && end >= time) return Math.max(0, end - time);
+    }
+    return 0;
+  }
+
+  function stopPreloadWarmup(element: HTMLVideoElement) {
+    if (!preloadOnlyRef.current || preloadWarmCompletedRef.current) return;
+    preloadWarmCompletedRef.current = true;
+    preloadWarmStartedRef.current = false;
+    if (preloadWarmTimeoutRef.current !== null) window.clearTimeout(preloadWarmTimeoutRef.current);
+    preloadWarmTimeoutRef.current = null;
+    element.pause();
+    if (hlsManagedRef.current) hlsRef.current?.stopLoad();
+  }
+
+  function checkPreloadWarmBuffer(element: HTMLVideoElement) {
+    if (!preloadOnlyRef.current || !preloadWarmStartedRef.current || preloadWarmCompletedRef.current) return;
+    if (bufferedAheadSeconds(element) >= preloadTargetSecondsRef.current || element.currentTime >= MAX_REEL_WARMUP_PLAYBACK_SECONDS) stopPreloadWarmup(element);
   }
 
   function startActivePlayback(element: HTMLVideoElement) {
@@ -339,9 +397,21 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
   }, [preloadOnly, reelAudio]);
 
   function startSilentWarm(element: HTMLVideoElement) {
-    if (!preloadOnlyRef.current || preloadWarmStartedRef.current) return;
+    if (!preloadOnlyRef.current || !warmPreloadRef.current || preloadWarmStartedRef.current || preloadWarmCompletedRef.current) return;
+    const targetSeconds = preloadTargetSecondsRef.current;
+    if (Number.isFinite(element.duration) && element.duration > 0 && element.duration <= targetSeconds + 0.5) {
+      preloadWarmCompletedRef.current = true;
+      if (hlsManagedRef.current) hlsRef.current?.stopLoad();
+      return;
+    }
     preloadWarmStartedRef.current = true;
-    void element.play().catch(() => { preloadWarmStartedRef.current = false; });
+    preloadWarmTimeoutRef.current = window.setTimeout(() => stopPreloadWarmup(element), 7000);
+    void element.play().catch(() => {
+      preloadWarmCompletedRef.current = true;
+      preloadWarmStartedRef.current = false;
+      if (preloadWarmTimeoutRef.current !== null) window.clearTimeout(preloadWarmTimeoutRef.current);
+      preloadWarmTimeoutRef.current = null;
+    });
   }
 
   function handleMediaError(event: React.SyntheticEvent<HTMLVideoElement>) {
@@ -363,10 +433,7 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
         playbackStatusCallbackRef.current?.(video.id, "loading");
         return;
       }
-      element.pause();
-      if (element.currentTime !== 0) {
-        try { element.currentTime = 0; } catch { /* Keep the current buffered position if the browser cannot seek yet. */ }
-      }
+      checkPreloadWarmBuffer(element);
       playbackStatusCallbackRef.current?.(video.id, hasPlayableMedia(element) ? "ready" : "loading");
       return;
     }
@@ -438,11 +505,12 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
     <video ref={setVideoElement} controls={showNativeControls} autoPlay={shouldAutoplay} playsInline muted={preloadOnly || muted || (reelAudio && autoplayMuted)} preload="metadata" poster={video.thumbnail_url || undefined}
       onLoadedMetadata={(event) => { const element = event.currentTarget; if (element.closest(".reel-media, .reels-player-layer") && element.videoWidth && element.videoHeight) element.dataset.reelOrientation = element.videoHeight > element.videoWidth ? "portrait" : "landscape"; setMediaDuration(Number.isFinite(element.duration) ? element.duration : 0); setMediaTime(element.currentTime || 0); publishNativeAudioAvailability(element); const ready = hasPlayableMedia(element); setLoading(!ready); playbackStatusCallbackRef.current?.(video.id, ready ? "ready" : "loading"); if (preloadOnlyRef.current) startSilentWarm(element); }}
       onDurationChange={(event) => setMediaDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)}
-      onCanPlay={(event) => { publishNativeAudioAvailability(event.currentTarget); setLoading(false); playbackStatusCallbackRef.current?.(video.id, "ready"); if (preloadOnlyRef.current) startSilentWarm(event.currentTarget); }}
+      onCanPlay={(event) => { publishNativeAudioAvailability(event.currentTarget); setLoading(false); playbackStatusCallbackRef.current?.(video.id, "ready"); if (preloadOnlyRef.current) startSilentWarm(event.currentTarget); checkPreloadWarmBuffer(event.currentTarget); }}
       onPlaying={handlePlaybackStarted}
       onPause={() => setMediaPlaying(false)}
       onWaiting={(event) => { publishNativeAudioAvailability(event.currentTarget); const ready = hasPlayableMedia(event.currentTarget); setLoading(!ready); playbackStatusCallbackRef.current?.(video.id, ready ? "ready" : "loading"); }}
-      onTimeUpdate={(event) => { setMediaTime(event.currentTarget.currentTime || 0); setMediaDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0); publishNativeAudioAvailability(event.currentTarget); }}
+      onTimeUpdate={(event) => { setMediaTime(event.currentTarget.currentTime || 0); setMediaDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0); publishNativeAudioAvailability(event.currentTarget); checkPreloadWarmBuffer(event.currentTarget); }}
+      onProgress={(event) => checkPreloadWarmBuffer(event.currentTarget)}
       onVolumeChange={(event) => { setMediaMuted(event.currentTarget.muted); setMediaVolume(event.currentTarget.volume); }}
       onError={handleMediaError}/>
     {playerOverlay}

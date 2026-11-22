@@ -22,6 +22,8 @@ type ReelAdPlacement = { id: string; afterVideoId: string; status: "pending" | "
 type ReelFeedItem =
   | { kind: "reel"; key: string; feedIndex: number; videoIndex: number; item: ReelItem }
   | { kind: "ad"; key: string; feedIndex: number; ad: ReelAdPlacement };
+type NetworkInformationLike = EventTarget & { saveData?: boolean; effectiveType?: string; downlink?: number };
+type ReelPreloadPlanItem = { videoId: string; distance: number; targetSeconds: number; mediaWarmup: boolean };
 
 function otherPlayerSlot(slot: PlayerSlot): PlayerSlot {
   return slot === "a" ? "b" : "a";
@@ -36,6 +38,7 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
   const [mobileViewport, setMobileViewport] = useState<boolean | null>(null);
+  const [allowNextMediaWarmup, setAllowNextMediaWarmup] = useState(true);
   const [playerSlots, setPlayerSlots] = useState<PlayerSlots>({ a: null, b: null });
   const [activePlayerSlot, setActivePlayerSlot] = useState<PlayerSlot>("a");
   const [activePlaybackStatus, setActivePlaybackStatus] = useState<ReelPlaybackStatus>("loading");
@@ -180,6 +183,12 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
     }
     return feed;
   }, [adPlacements, mobileViewport, videos]);
+  const preloadPlan = useMemo<ReelPreloadPlanItem[]>(() => videos.slice(activeIndex + 1, activeIndex + 6).map((item, index) => ({
+    videoId: item.video.id,
+    distance: index + 1,
+    targetSeconds: [4, 4, 3, 3, 0][index],
+    mediaWarmup: index === 0 && allowNextMediaWarmup,
+  })), [activeIndex, allowNextMediaWarmup, videos]);
   const reelFeedPositions = useMemo(() => {
     const positions = new Map<string, number>();
     for (const item of feedItems) if (item.kind === "reel") positions.set(item.item.video.id, item.feedIndex);
@@ -318,6 +327,18 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
     update();
     breakpoint.addEventListener("change", update);
     return () => breakpoint.removeEventListener("change", update);
+  }, []);
+
+  useEffect(() => {
+    const connection = (navigator as Navigator & { connection?: NetworkInformationLike }).connection;
+    const update = () => {
+      if (!connection) { setAllowNextMediaWarmup(true); return; }
+      const type = connection.effectiveType?.toLowerCase();
+      setAllowNextMediaWarmup(!connection.saveData && type !== "slow-2g" && type !== "2g" && !(typeof connection.downlink === "number" && connection.downlink < 1));
+    };
+    update();
+    connection?.addEventListener("change", update);
+    return () => connection?.removeEventListener("change", update);
   }, []);
 
   useEffect(() => {
@@ -466,12 +487,13 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
              {!hasMore && videos.length > 0 && <div className="reels-load-status end">You are all caught up.</div>}
               {mobileViewport === true && <div className="reels-player-layer" aria-label="Active Reel playback" style={{ height: `${feedItems.length * 100}dvh` }}>
                {(["a", "b"] as const).map((slot) => {
-                 const item = playerSlots[slot];
-                 if (!item) return null;
-                 const isActive = slot === activePlayerSlot;
-                   const slotIndex = reelFeedPositions.get(item.video.id) ?? 0;
-                   return <div className={`reel-player-slot ${isActive ? "active" : "preparing"}`} aria-hidden={!isActive} key={slot} style={{ top: `${Math.max(0, slotIndex) * 100}dvh` }}>
-                       <VideoPlayer key={slot} video={item.video} playbackUrl={item.playbackUrl} playbackType={item.playbackType} sourceHost={item.sourceHost} muted={!isActive} reelAudio controls={false} reelControls={isActive} preloadOnly={!isActive} loadingPresentation="external" onVideoElement={slot === "a" ? setSlotAVideoElement : setSlotBVideoElement} onPlaybackStarted={isActive ? onNormalReelPlaybackStarted : undefined} onPlaybackStatusChange={(videoId, status) => reportSlotPlaybackStatus(slot, videoId, status)} onAudioAvailabilityChange={(videoId, availability) => reportSlotAudioAvailability(slot, videoId, availability)}/>
+                  const item = playerSlots[slot];
+                  if (!item) return null;
+                  const isActive = slot === activePlayerSlot;
+                    const preloadPriority = preloadPlan.find((candidate) => candidate.videoId === item.video.id);
+                    const slotIndex = reelFeedPositions.get(item.video.id) ?? 0;
+                    return <div className={`reel-player-slot ${isActive ? "active" : "preparing"}`} aria-hidden={!isActive} key={slot} style={{ top: `${Math.max(0, slotIndex) * 100}dvh` }}>
+                        <VideoPlayer key={slot} video={item.video} playbackUrl={item.playbackUrl} playbackType={item.playbackType} sourceHost={item.sourceHost} muted={!isActive} reelAudio controls={false} reelControls={isActive} preloadOnly={!isActive} warmPreload={isActive || Boolean(preloadPriority?.mediaWarmup)} preloadTargetSeconds={preloadPriority?.targetSeconds || 4} loadingPresentation="external" onVideoElement={slot === "a" ? setSlotAVideoElement : setSlotBVideoElement} onPlaybackStarted={isActive ? onNormalReelPlaybackStarted : undefined} onPlaybackStatusChange={(videoId, status) => reportSlotPlaybackStatus(slot, videoId, status)} onAudioAvailabilityChange={(videoId, availability) => reportSlotAudioAvailability(slot, videoId, availability)}/>
                     {isActive && <div className={`reels-video-skeleton${activePlaybackStatus === "ready" ? " ready" : activePlaybackStatus === "error" ? " failed" : ""}`} aria-hidden="true"><div className="reels-skeleton-caption"><span className="reels-skeleton-title long"/><span className="reels-skeleton-title short"/><span className="reels-skeleton-views"/></div></div>}
                      {isActive && <div className="reel-caption mobile-reel-caption"><h1>{item.video.title}</h1><PublicViewCount count={item.displayViews} className="reel-view-count"/></div>}
                     {isActive && activeAudioAvailability === "none" && <span className="reel-no-audio" role="img" aria-label="This video has no audio track"><VolumeX size={15}/></span>}

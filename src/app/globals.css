@@ -560,6 +560,14 @@ nextjs-portal {
   .reel-player-slot.active { z-index: 1; }
   .reel-player-slot.preparing { z-index: 0; }
   .reel-player-slot.active .video-bottom-controls { pointer-events: auto; touch-action: manipulation; }
+  .reel-player-slot.active .video-control-row { display: grid; grid-template-columns: 37px max-content 40px 34px 34px minmax(0,1fr) 40px; gap: clamp(8px,3vw,18px); }
+  .reel-player-slot.active .video-control-row > :nth-child(1) { grid-column: 1; }
+  .reel-player-slot.active .video-control-row > :nth-child(2) { grid-column: 2; }
+  .reel-player-slot.active .video-control-row > .video-speed-button { grid-column: 7; grid-row: 1; justify-self: end; }
+  .reel-player-slot.active .video-control-row > .video-speed-position-slot { grid-column: 3; grid-row: 1; }
+  .reel-player-slot.active .video-control-row > :nth-child(5) { grid-column: 4; }
+  .reel-player-slot.active .video-control-row > :nth-child(6) { grid-column: 5; }
+  @media (max-width: 360px) { .reel-player-slot.active .video-control-row { grid-template-columns: 32px max-content 32px 28px 28px minmax(0,1fr) 36px; gap: 4px; }.reel-player-slot.active .video-time-remaining { font-size: 10px; } }
   .reels-player-layer .player-frame:not(.preload-only) { position: absolute; inset: 0; width: 100%; height: 100%; max-height: none; aspect-ratio: auto; overflow: hidden; border-radius: 0; }
   .reels-player-layer .player-error { pointer-events: auto; }
   .reels-page .player-frame.preload-only { position: absolute; inset: 0; z-index: 0; width: 100%; height: 100%; max-height: none; aspect-ratio: auto; overflow: hidden; opacity: 0; pointer-events: none; }

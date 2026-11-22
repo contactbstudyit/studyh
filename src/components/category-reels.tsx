@@ -18,6 +18,7 @@ type PlayerSlot = "a" | "b";
 type PlayerSlots = Record<PlayerSlot, ReelItem | null>;
 type ReelPlaybackStatus = "loading" | "ready" | "error";
 type ReelAudioAvailability = "unknown" | "available" | "none";
+const REELS_PER_AD = 3;
 type ReelAdPlacement = { id: string; afterVideoId: string; status: "pending" | "loading" | "served" | "no-fill"; attempt: number };
 type ReelFeedItem =
   | { kind: "reel"; key: string; feedIndex: number; videoIndex: number; item: ReelItem }
@@ -57,7 +58,6 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
   const activeAdIdRef = useRef(activeAdId);
   const countedReelIdsRef = useRef(new Set<string>());
   const reelCountSinceAdRef = useRef(0);
-  const nextAdThresholdRef = useRef(3 + Math.floor(Math.random() * 3));
   const adThresholdReachedAtRef = useRef<number | null>(null);
   const adPlacementSequenceRef = useRef(0);
   const pendingAdIdRef = useRef<string | null>(null);
@@ -138,7 +138,7 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
     if (mobileViewport !== true || countedReelIdsRef.current.has(videoId)) return;
     countedReelIdsRef.current.add(videoId);
     reelCountSinceAdRef.current += 1;
-    if (reelCountSinceAdRef.current < nextAdThresholdRef.current || pendingAdIdRef.current) return;
+    if (reelCountSinceAdRef.current < REELS_PER_AD || pendingAdIdRef.current) return;
     const videoIndex = videosRef.current.findIndex((item) => item.video.id === videoId);
     const currentVideo = videosRef.current[Math.max(videoIndex, activeIndexRef.current)] ?? videosRef.current[videoIndex];
     if (!currentVideo) return;
@@ -148,7 +148,6 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
     updateAdPlacements(next);
     pendingAdIdRef.current = id;
     reelCountSinceAdRef.current = 0;
-    nextAdThresholdRef.current = 3 + Math.floor(Math.random() * 3);
   }, [mobileViewport, updateAdPlacements]);
 
   const recordReelImpression = useCallback((videoId: string) => {
@@ -267,7 +266,6 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
       setActiveAdId(null);
       countedReelIdsRef.current.clear();
       reelCountSinceAdRef.current = 0;
-      nextAdThresholdRef.current = 3 + Math.floor(Math.random() * 3);
       adPlacementSequenceRef.current = 0;
       pausedReelForAdRef.current = null;
       setLoading(true);
@@ -362,7 +360,6 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
         if (reelCountSinceAdRef.current > 0 || countedReelIdsRef.current.size > 0) {
           reelCountSinceAdRef.current = 0;
           countedReelIdsRef.current.clear();
-          nextAdThresholdRef.current = 3 + Math.floor(Math.random() * 3);
         }
       }
       if (mobileViewport === false && (playerSlotsRef.current.a || playerSlotsRef.current.b)) {

@@ -21,7 +21,7 @@ function detectNativeAudioAvailability(element: HTMLVideoElement): ReelAudioAvai
   return "unknown";
 }
 
-export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onViewCounted, onPlaybackStarted, onPlaybackStatusChange, onAudioAvailabilityChange, loadingPresentation = "spinner", muted = false, reelAudio = false, controls = true, preloadOnly = false, autoPlay, onVideoElement, playerOverlay }: {
+export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onViewCounted, onPlaybackStarted, onPlaybackStatusChange, onAudioAvailabilityChange, loadingPresentation = "spinner", muted = false, reelAudio = false, controls = true, reelControls = false, preloadOnly = false, autoPlay, onVideoElement, playerOverlay }: {
   video: WatchVideo;
   playbackUrl: string;
   playbackType: VideoSourceType;
@@ -34,12 +34,15 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
   muted?: boolean;
   reelAudio?: boolean;
   controls?: boolean;
+  reelControls?: boolean;
   preloadOnly?: boolean;
   autoPlay?: boolean;
   onVideoElement?: (element: HTMLVideoElement | null) => void;
   playerOverlay?: ReactNode;
 }) {
   const shouldAutoplay = autoPlay ?? (!preloadOnly && !reelAudio);
+  const showCustomControls = reelControls && !preloadOnly;
+  const showNativeControls = controls && !reelControls;
   const allowAutomaticPlayback = autoPlay !== false;
   const [failure, setFailure] = useState("");
   const [loading, setLoading] = useState(true);
@@ -441,7 +444,7 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
   const progressPercent = mediaDuration > 0 ? Math.min(100, Math.max(0, (mediaTime / mediaDuration) * 100)) : 0;
   const diagnosticLines = [`Source: ${sourceHost}`, `Format: ${sourceType.toUpperCase()}`, diagnostics.hlsStatus !== null ? `HTTP status: ${diagnostics.hlsStatus}` : null, diagnostics.hlsType ? `Player category: ${diagnostics.hlsType}` : null];
   return <div className={`player-frame${preloadOnly ? " preload-only" : ""}`} data-source-type={sourceType} aria-hidden={preloadOnly || undefined}>
-    <video ref={setVideoElement} controls={false} autoPlay={shouldAutoplay} playsInline muted={preloadOnly || muted || (reelAudio && autoplayMuted)} preload="metadata" poster={video.thumbnail_url || undefined}
+    <video ref={setVideoElement} controls={showNativeControls} autoPlay={shouldAutoplay} playsInline muted={preloadOnly || muted || (reelAudio && autoplayMuted)} preload="metadata" poster={video.thumbnail_url || undefined}
       onLoadedMetadata={(event) => { const element = event.currentTarget; if (element.closest(".reel-media, .reels-player-layer") && element.videoWidth && element.videoHeight) element.dataset.reelOrientation = element.videoHeight > element.videoWidth ? "portrait" : "landscape"; setMediaDuration(Number.isFinite(element.duration) ? element.duration : 0); setMediaTime(element.currentTime || 0); publishNativeAudioAvailability(element); const ready = hasPlayableMedia(element); setLoading(!ready); playbackStatusCallbackRef.current?.(video.id, ready ? "ready" : "loading"); if (preloadOnlyRef.current) startSilentWarm(element); }}
       onDurationChange={(event) => setMediaDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)}
       onCanPlay={(event) => { publishNativeAudioAvailability(event.currentTarget); setLoading(false); playbackStatusCallbackRef.current?.(video.id, "ready"); if (preloadOnlyRef.current) startSilentWarm(event.currentTarget); }}
@@ -452,7 +455,7 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
       onVolumeChange={(event) => { setMediaMuted(event.currentTarget.muted); setMediaVolume(event.currentTarget.volume); }}
       onError={handleMediaError}/>
     {playerOverlay}
-    {controls && !preloadOnly && !failure && <div className="video-bottom-controls" onClick={(event) => event.stopPropagation()}>
+    {showCustomControls && !failure && <div className="video-bottom-controls" onClick={(event) => event.stopPropagation()}>
       <input className="video-timeline" type="range" min={0} max={mediaDuration > 0 ? mediaDuration : 1} step="0.01" value={Math.min(mediaTime, mediaDuration || 0)} style={{ "--video-progress": `${progressPercent}%` } as CSSProperties} aria-label="Video progress" disabled={mediaDuration <= 0} onChange={(event) => seekMedia(Number(event.currentTarget.value))}/>
       <div className="video-control-row">
         <button className="video-control-button video-play-toggle" type="button" aria-label={mediaPlaying ? "Pause video" : "Play video"} onClick={() => void toggleMediaPlayback()}>{mediaPlaying ? <Pause size={25} fill="currentColor"/> : <Play size={25} fill="currentColor"/>}</button>
@@ -465,6 +468,6 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
     </div>}
     {loading && !failure && loadingPresentation === "spinner" && <div className="player-loading"><span className="spinner"/><span>Loading video...</span></div>}
     {failure && <div className="player-error"><Film size={24}/><strong>Unable to play this video</strong><span className="player-reason">{failure}</span><span className="player-diagnostics">{diagnosticLines.join(" · ")}</span><button type="button" onClick={() => { setFailure(""); setAttempt((current) => current + 1); }}>Try again</button></div>}
-    {!controls && <span className="player-hint"><Command size={12}/> SPACE TO PLAY</span>}
+    {!controls && !reelControls && <span className="player-hint"><Command size={12}/> SPACE TO PLAY</span>}
   </div>;
 }

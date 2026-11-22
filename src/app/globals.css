@@ -559,6 +559,7 @@ nextjs-portal {
   .reel-player-slot { position: absolute; right: 0; left: 0; height: calc(100dvh - 68px - env(safe-area-inset-bottom,0px)); pointer-events: none; }
   .reel-player-slot.active { z-index: 1; }
   .reel-player-slot.preparing { z-index: 0; }
+  .reel-player-slot.active .video-bottom-controls { pointer-events: auto; touch-action: manipulation; }
   .reels-player-layer .player-frame:not(.preload-only) { position: absolute; inset: 0; width: 100%; height: 100%; max-height: none; aspect-ratio: auto; overflow: hidden; border-radius: 0; }
   .reels-player-layer .player-error { pointer-events: auto; }
   .reels-page .player-frame.preload-only { position: absolute; inset: 0; z-index: 0; width: 100%; height: 100%; max-height: none; aspect-ratio: auto; overflow: hidden; opacity: 0; pointer-events: none; }

@@ -29,7 +29,7 @@ type CloudflareVideoAccount = { id: string; name: string; accountId: string; end
 type CloudflareVideoStorageObject = { key: string; size: number; lastModified: string | null; publicUrl: string };
 type CloudflareVideoStorageView = { account: Pick<CloudflareVideoAccount, "id" | "name" | "bucketName" | "publicUrl">; objects: CloudflareVideoStorageObject[]; nextContinuationToken: string | null; usage: { objectCount: number; totalBytes: number } };
 type DuplicateVideoCandidate = Pick<VideoRecord, "id" | "title" | "video_url" | "category_id" | "views" | "created_at" | "thumbnail_url">;
-type DuplicateVideoGroup = { key: string; matchBasis: string; keep: DuplicateVideoCandidate; duplicates: DuplicateVideoCandidate[]; autoDeleteIds: string[] };
+type DuplicateVideoGroup = { key: string; matchBasis: string; keep: DuplicateVideoCandidate; duplicates: DuplicateVideoCandidate[] };
 
 function normalizeDuplicateVideoUrl(source: string) {
   try {
@@ -1057,13 +1057,16 @@ export default function AdminDashboard() {
         const keep = ordered[0];
         const sameUrl = new Set(matches.map((video) => normalizeDuplicateVideoUrl(video.video_url))).size < matches.length;
         const sameTitle = new Set(matches.map((video) => normalizeDuplicateVideoTitle(video.title))).size < matches.length;
-        const keepUrl = normalizeDuplicateVideoUrl(keep.video_url);
-        const autoDeleteIds = ordered.slice(1).filter((video) => normalizeDuplicateVideoUrl(video.video_url) === keepUrl).map((video) => video.id);
-        duplicates.push({ key: root, matchBasis: sameUrl && sameTitle ? "Exact source URL and title matches" : sameUrl ? "Exact source URL matches" : "Exact title matches; review before deleting", keep, duplicates: ordered.slice(1), autoDeleteIds });
+        duplicates.push({ key: root, matchBasis: sameUrl && sameTitle ? "Exact source URL and title matches" : sameUrl ? "Exact source URL matches" : "Exact title matches", keep, duplicates: ordered.slice(1) });
       }
       setDuplicateGroups(duplicates);
-      setSelectedDuplicateVideoIds(new Set(duplicates.flatMap((group) => group.autoDeleteIds)));
-      if (duplicates.length) toast.info(`Found ${duplicates.reduce((count, group) => count + group.duplicates.length, 0)} duplicate candidates by exact source URL or exact title. Highest-view records are marked to keep.`);
+      const duplicateIds = duplicates.flatMap((group) => group.duplicates.map((video) => video.id));
+      setSelectedDuplicateVideoIds(new Set(duplicateIds));
+      if (duplicates.length) {
+        const confirmed = window.confirm(`Found ${duplicateIds.length} duplicate video records by exact source URL or exact title. The highest-view video in each match group will be kept. Delete the other records and their generated thumbnails now? Original video files will remain in storage.`);
+        if (confirmed) await deleteSelectedDuplicateVideos(duplicateIds, true);
+        else toast.info("Duplicate candidates are listed below. Review the selection and confirm deletion when ready.");
+      }
       else toast.success("No exact-source URL or exact-title duplicate groups found.");
     } catch (error) {
       setDuplicateScanError(error instanceof Error ? error.message : "Could not scan for duplicates.");
@@ -1072,9 +1075,9 @@ export default function AdminDashboard() {
     }
   }
 
-  async function deleteSelectedDuplicateVideos() {
-    const ids = [...selectedDuplicateVideoIds];
-    if (!ids.length || duplicateDeleteBusy || !window.confirm(`Delete ${ids.length} selected duplicate video record${ids.length === 1 ? "" : "s"}? The highest-view record in each match group is kept. This removes video records and app-generated thumbnails, but does not delete original R2/external video files.`)) return;
+  async function deleteSelectedDuplicateVideos(confirmedIds?: string[], alreadyConfirmed = false) {
+    const ids = confirmedIds ?? [...selectedDuplicateVideoIds];
+    if (!ids.length || duplicateDeleteBusy || (!alreadyConfirmed && !window.confirm(`Delete ${ids.length} selected duplicate video record${ids.length === 1 ? "" : "s"}? Kept records remain. This removes video records and app-generated thumbnails, but does not delete original R2/external video files.`))) return;
     setDuplicateDeleteBusy(true);
     let deleted = 0;
     const failedIds = new Set<string>();
@@ -1118,7 +1121,7 @@ export default function AdminDashboard() {
           <VideoTable videos={videosHook.videos} categories={categoriesHook.categories} onEdit={openVideo} onDelete={removeVideo} onToggle={toggleVideo} onGenerateThumbnail={generateThumbnailFor} generatingThumbnailIds={generatingThumbnailIds} onCheckVideo={checkSingleVideo} checkingVideoIds={checkingVideoIds} checkDisabled={mediaMaintenanceRunning}/>
           <VideoPagination page={videoPage} totalPages={adminTotalPages} loading={videosHook.loading} onPageChange={(page) => goToVideos(page, false)} hideNextOnLast/>
           {(duplicateScanBusy || duplicateScanError || duplicateGroups.length > 0) && <section className="duplicate-video-results" aria-live="polite">
-            <div className="duplicate-video-results-heading"><div><h2>{duplicateScanBusy ? "Scanning duplicate sources…" : "Duplicate videos"}</h2><p>Exact normalized source URLs and exact normalized titles are matched. Highest-view record is kept; title-only matches are not preselected, so review them carefully.</p></div><span>{duplicateGroups.reduce((count, group) => count + group.duplicates.length, 0)} candidates</span></div>
+            <div className="duplicate-video-results-heading"><div><h2>{duplicateScanBusy ? "Scanning duplicate sources…" : "Duplicate videos"}</h2><p>Exact normalized source URLs and exact normalized titles are matched. The highest-view record in each group is kept.</p></div><span>{duplicateGroups.reduce((count, group) => count + group.duplicates.length, 0)} candidates</span></div>
             {duplicateScanError && <p className="field-error" role="alert">{duplicateScanError}</p>}
             {duplicateGroups.map((group) => <div className="duplicate-video-group" key={group.key}>
               <p className="duplicate-video-source">{group.matchBasis}</p>
@@ -1126,7 +1129,7 @@ export default function AdminDashboard() {
               <div className="duplicate-video-row kept"><span className="duplicate-video-keep-badge">KEEP</span><div><strong>{group.keep.title}</strong><small>{group.keep.views.toLocaleString()} views · {group.keep.category_id === categoryFilter ? "Selected category" : "Existing record"}</small></div></div>
               {group.duplicates.map((video) => <label className="duplicate-video-row" key={video.id}><input type="checkbox" checked={selectedDuplicateVideoIds.has(video.id)} disabled={duplicateDeleteBusy} onChange={() => setSelectedDuplicateVideoIds((current) => { const next = new Set(current); if (next.has(video.id)) next.delete(video.id); else next.add(video.id); return next; })}/><div><strong>{video.title}</strong><small>{video.views.toLocaleString()} views · {video.created_at ? new Date(video.created_at).toLocaleDateString() : ""}</small></div><span>Duplicate</span></label>)}
             </div>)}
-            {!duplicateScanBusy && !duplicateScanError && duplicateGroups.length === 0 && <p className="admin-empty">No duplicate source URLs found in {categoryFilter ? "the selected category" : "the library"}.</p>}
+            {!duplicateScanBusy && !duplicateScanError && duplicateGroups.length === 0 && <p className="admin-empty">No duplicate source URLs or exact titles found in {categoryFilter ? "the selected category" : "the library"}.</p>}
             {duplicateGroups.length > 0 && <div className="duplicate-video-actions"><span>{selectedDuplicateVideoIds.size} duplicate records selected</span><button className="cloudflare-storage-delete" type="button" disabled={!selectedDuplicateVideoIds.size || duplicateDeleteBusy} onClick={() => void deleteSelectedDuplicateVideos()}>{duplicateDeleteBusy ? "Deleting duplicates…" : "Delete selected duplicates"}</button></div>}
           </section>}
           {(videoCheckRunning || videoCheckSummary || videoCheckFailure) && <section className="video-check-results" aria-live="polite">

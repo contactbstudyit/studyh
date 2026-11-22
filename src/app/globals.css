@@ -109,6 +109,26 @@ body { background: #000; color: #fff; font-family: var(--font-geist-sans), syste
 .footer > span { color: #777; }
 .watch-modal,.add-modal { background: #0a0a0a; border-color: #222; }
 .player-frame { background: #000; }
+.video-bottom-controls { position: absolute; z-index: 12; right: 0; bottom: 0; left: 0; display: flex; flex-direction: column; gap: 4px; padding: 7px 14px calc(8px + env(safe-area-inset-bottom,0px)); background: #000; color: #fff; }
+.video-timeline { --video-progress: 0%; display: block; width: 100%; height: 3px; margin: 0; border: 0; border-radius: 99px; appearance: none; background: linear-gradient(to right,#ddd 0%,#ddd var(--video-progress),#444 var(--video-progress),#444 100%); cursor: pointer; }
+.video-timeline::-webkit-slider-runnable-track { height: 3px; border-radius: 99px; background: transparent; }
+.video-timeline::-moz-range-track { height: 3px; border-radius: 99px; background: transparent; }
+.video-timeline::-webkit-slider-thumb { width: 8px; height: 8px; margin-top: -2.5px; border: 0; border-radius: 50%; appearance: none; background: #eee; opacity: 0; transition: opacity .12s ease; }
+.video-timeline::-moz-range-thumb { width: 8px; height: 8px; border: 0; border-radius: 50%; background: #eee; opacity: 0; transition: opacity .12s ease; }
+.video-bottom-controls:hover .video-timeline::-webkit-slider-thumb,.video-timeline:focus-visible::-webkit-slider-thumb { opacity: 1; }
+.video-bottom-controls:hover .video-timeline::-moz-range-thumb,.video-timeline:focus-visible::-moz-range-thumb { opacity: 1; }
+.video-timeline:disabled { cursor: default; opacity: .55; }
+.video-control-row { display: flex; align-items: center; gap: clamp(12px,2.2vw,25px); min-height: 39px; }
+.video-control-button { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; min-width: 34px; min-height: 36px; padding: 0; border: 0; background: transparent; color: #fff; cursor: pointer; }
+.video-control-button:hover { color: #d5d5d5; }
+.video-control-button:focus-visible,.video-timeline:focus-visible { outline: 2px solid #aaa; outline-offset: 3px; }
+.video-play-toggle { min-width: 37px; }
+.video-speed-button { min-width: 40px; font-size: 13px; font-weight: 500; }
+.video-time-remaining { color: #bcbcbc; font-variant-numeric: tabular-nums; font-size: 12px; white-space: nowrap; }
+.video-time-total { color: #858585; }
+.player-frame:fullscreen { width: 100vw; height: 100dvh; max-height: none; aspect-ratio: auto; border-radius: 0; }
+.player-frame:fullscreen video { width: 100%; height: 100%; object-fit: contain; }
+@media (max-width: 600px) { .video-bottom-controls { gap: 3px; padding-right: 12px; padding-left: 12px; }.video-control-row { gap: clamp(8px,3vw,18px); }.video-control-button { min-width: 32px; }.video-time-remaining { font-size: 11px; } }
 .watch-info h2,.modal-title h2 { font-family: var(--font-geist-sans),system-ui,sans-serif; font-size: 20px; font-weight: 600; letter-spacing: -.2px; }
 .admin-view { padding-top: 45px; }
 .stat-card { background: #0b0b0b; border-color: #222; }

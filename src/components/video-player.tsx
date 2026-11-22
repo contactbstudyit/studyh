@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
-import { Command, Film } from "lucide-react";
+import type { CSSProperties, ReactNode } from "react";
+import { Command, Film, Maximize, Pause, PictureInPicture2, Play, Volume2, VolumeX } from "lucide-react";
 import { recordPublicVideoView } from "@/hooks/use-library";
 import type { VideoRecord } from "@/hooks/use-library";
 import { getPlaybackFailureReason, probeVideoSource, supportsNativeHls } from "@/lib/video-playback";
@@ -64,6 +64,12 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
   const activePlayAttemptRef = useRef(false);
   const playbackAttemptIdRef = useRef(0);
   const [autoplayMuted, setAutoplayMuted] = useState(false);
+  const [mediaTime, setMediaTime] = useState(0);
+  const [mediaDuration, setMediaDuration] = useState(0);
+  const [mediaPlaying, setMediaPlaying] = useState(false);
+  const [mediaMuted, setMediaMuted] = useState(muted);
+  const [mediaVolume, setMediaVolume] = useState(1);
+  const [mediaPlaybackRate, setMediaPlaybackRate] = useState(1);
   const setVideoElement = useCallback((element: HTMLVideoElement | null) => {
     videoRef.current = element;
     onVideoElement?.(element);
@@ -118,6 +124,12 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
     if (preloadOnly) { element.muted = true; element.volume = 0; }
     else if (reelAudio) { element.muted = false; element.volume = 1; }
     else element.muted = muted;
+    setMediaTime(0);
+    setMediaDuration(Number.isFinite(element.duration) ? element.duration : 0);
+    setMediaPlaying(false);
+    setMediaMuted(element.muted);
+    setMediaVolume(element.volume);
+    setMediaPlaybackRate(element.playbackRate || 1);
     element.removeAttribute("src"); element.load();
     void (async () => {
       try {
@@ -340,6 +352,7 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
 
   function handlePlaybackStarted() {
     setLoading(false);
+    setMediaPlaying(true);
     const element = videoRef.current;
     if (element) publishNativeAudioAvailability(element);
     if (preloadOnlyRef.current) {
@@ -362,6 +375,96 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
     }
     playbackStartedCallbackRef.current?.(video.id);
   }
+
+  function formatMediaTime(seconds: number) {
+    if (!Number.isFinite(seconds) || seconds < 0) return "--:--";
+    const wholeSeconds = Math.floor(seconds);
+    const minutes = Math.floor(wholeSeconds / 60);
+    const remainder = wholeSeconds % 60;
+    return `${minutes}:${String(remainder).padStart(2, "0")}`;
+  }
+
+  async function toggleMediaPlayback() {
+    const element = videoRef.current;
+    if (!element || preloadOnlyRef.current) return;
+    if (element.paused || element.ended) {
+      try { await element.play(); } catch { /* Existing player and ad listeners handle blocked or intercepted playback. */ }
+    } else element.pause();
+  }
+
+  function seekMedia(position: number) {
+    const element = videoRef.current;
+    if (!element || !Number.isFinite(element.duration)) return;
+    const next = Math.min(element.duration, Math.max(0, position));
+    element.currentTime = next;
+    setMediaTime(next);
+  }
+
+  function cycleMediaPlaybackRate() {
+    const element = videoRef.current;
+    if (!element) return;
+    const rates = [0.5, 0.75, 1, 1.25, 1.5, 2];
+    const currentIndex = rates.indexOf(element.playbackRate);
+    const nextRate = rates[(currentIndex + 1 + rates.length) % rates.length];
+    element.playbackRate = nextRate;
+    setMediaPlaybackRate(nextRate);
+  }
+
+  function toggleMediaMute() {
+    const element = videoRef.current;
+    if (!element) return;
+    element.muted = !element.muted;
+    if (!element.muted && element.volume === 0) element.volume = 1;
+    setMediaMuted(element.muted);
+    setMediaVolume(element.volume);
+  }
+
+  async function requestPlayerFullscreen() {
+    const frame = videoRef.current?.closest<HTMLElement>(".player-frame");
+    if (!frame) return;
+    try {
+      if (document.fullscreenElement === frame) await document.exitFullscreen();
+      else await frame.requestFullscreen();
+    } catch { /* Fullscreen may be unavailable or denied by the browser. */ }
+  }
+
+  async function requestPlayerPictureInPicture() {
+    const element = videoRef.current as (HTMLVideoElement & { requestPictureInPicture?: () => Promise<PictureInPictureWindow> }) | null;
+    if (!element?.requestPictureInPicture) return;
+    try {
+      if (document.pictureInPictureElement === element) await document.exitPictureInPicture();
+      else await element.requestPictureInPicture();
+    } catch { /* Picture-in-Picture may be unavailable or denied by the browser. */ }
+  }
+
+  const remainingTime = Math.max(0, mediaDuration - mediaTime);
+  const progressPercent = mediaDuration > 0 ? Math.min(100, Math.max(0, (mediaTime / mediaDuration) * 100)) : 0;
   const diagnosticLines = [`Source: ${sourceHost}`, `Format: ${sourceType.toUpperCase()}`, diagnostics.hlsStatus !== null ? `HTTP status: ${diagnostics.hlsStatus}` : null, diagnostics.hlsType ? `Player category: ${diagnostics.hlsType}` : null];
-  return <div className={`player-frame${preloadOnly ? " preload-only" : ""}`} data-source-type={sourceType} aria-hidden={preloadOnly || undefined}><video ref={setVideoElement} controls={controls} autoPlay={shouldAutoplay} playsInline muted={preloadOnly || muted || (reelAudio && autoplayMuted)} preload="metadata" poster={video.thumbnail_url || undefined} onLoadedMetadata={(event) => { const element = event.currentTarget; if (element.closest(".reel-media, .reels-player-layer") && element.videoWidth && element.videoHeight) element.dataset.reelOrientation = element.videoHeight > element.videoWidth ? "portrait" : "landscape"; publishNativeAudioAvailability(element); const ready = hasPlayableMedia(element); setLoading(!ready); playbackStatusCallbackRef.current?.(video.id, ready ? "ready" : "loading"); if (preloadOnlyRef.current) startSilentWarm(element); }} onCanPlay={(event) => { publishNativeAudioAvailability(event.currentTarget); setLoading(false); playbackStatusCallbackRef.current?.(video.id, "ready"); if (preloadOnlyRef.current) startSilentWarm(event.currentTarget); }} onPlaying={handlePlaybackStarted} onWaiting={(event) => { publishNativeAudioAvailability(event.currentTarget); const ready = hasPlayableMedia(event.currentTarget); setLoading(!ready); playbackStatusCallbackRef.current?.(video.id, ready ? "ready" : "loading"); }} onTimeUpdate={(event) => publishNativeAudioAvailability(event.currentTarget)} onError={handleMediaError}/>{playerOverlay}{loading && !failure && loadingPresentation === "spinner" && <div className="player-loading"><span className="spinner"/><span>Loading video...</span></div>}{failure && <div className="player-error"><Film size={24}/><strong>Unable to play this video</strong><span className="player-reason">{failure}</span><span className="player-diagnostics">{diagnosticLines.join(" · ")}</span><button type="button" onClick={() => { setFailure(""); setAttempt((current) => current + 1); }}>Try again</button></div>}<span className="player-hint"><Command size={12}/> SPACE TO PLAY</span></div>;
+  return <div className={`player-frame${preloadOnly ? " preload-only" : ""}`} data-source-type={sourceType} aria-hidden={preloadOnly || undefined}>
+    <video ref={setVideoElement} controls={false} autoPlay={shouldAutoplay} playsInline muted={preloadOnly || muted || (reelAudio && autoplayMuted)} preload="metadata" poster={video.thumbnail_url || undefined}
+      onLoadedMetadata={(event) => { const element = event.currentTarget; if (element.closest(".reel-media, .reels-player-layer") && element.videoWidth && element.videoHeight) element.dataset.reelOrientation = element.videoHeight > element.videoWidth ? "portrait" : "landscape"; setMediaDuration(Number.isFinite(element.duration) ? element.duration : 0); setMediaTime(element.currentTime || 0); publishNativeAudioAvailability(element); const ready = hasPlayableMedia(element); setLoading(!ready); playbackStatusCallbackRef.current?.(video.id, ready ? "ready" : "loading"); if (preloadOnlyRef.current) startSilentWarm(element); }}
+      onDurationChange={(event) => setMediaDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)}
+      onCanPlay={(event) => { publishNativeAudioAvailability(event.currentTarget); setLoading(false); playbackStatusCallbackRef.current?.(video.id, "ready"); if (preloadOnlyRef.current) startSilentWarm(event.currentTarget); }}
+      onPlaying={handlePlaybackStarted}
+      onPause={() => setMediaPlaying(false)}
+      onWaiting={(event) => { publishNativeAudioAvailability(event.currentTarget); const ready = hasPlayableMedia(event.currentTarget); setLoading(!ready); playbackStatusCallbackRef.current?.(video.id, ready ? "ready" : "loading"); }}
+      onTimeUpdate={(event) => { setMediaTime(event.currentTarget.currentTime || 0); setMediaDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0); publishNativeAudioAvailability(event.currentTarget); }}
+      onVolumeChange={(event) => { setMediaMuted(event.currentTarget.muted); setMediaVolume(event.currentTarget.volume); }}
+      onError={handleMediaError}/>
+    {playerOverlay}
+    {controls && !preloadOnly && !failure && <div className="video-bottom-controls" onClick={(event) => event.stopPropagation()}>
+      <input className="video-timeline" type="range" min={0} max={mediaDuration > 0 ? mediaDuration : 1} step="0.01" value={Math.min(mediaTime, mediaDuration || 0)} style={{ "--video-progress": `${progressPercent}%` } as CSSProperties} aria-label="Video progress" disabled={mediaDuration <= 0} onChange={(event) => seekMedia(Number(event.currentTarget.value))}/>
+      <div className="video-control-row">
+        <button className="video-control-button video-play-toggle" type="button" aria-label={mediaPlaying ? "Pause video" : "Play video"} onClick={() => void toggleMediaPlayback()}>{mediaPlaying ? <Pause size={25} fill="currentColor"/> : <Play size={25} fill="currentColor"/>}</button>
+        <span className="video-time-remaining">-{formatMediaTime(remainingTime)}{mediaDuration > 0 && <span className="video-time-total"> / {formatMediaTime(mediaDuration)}</span>}</span>
+        <button className="video-control-button video-speed-button" type="button" aria-label={`Playback speed ${mediaPlaybackRate}x`} onClick={cycleMediaPlaybackRate}>{mediaPlaybackRate}x</button>
+        <button className="video-control-button" type="button" aria-label={mediaMuted || mediaVolume === 0 ? "Unmute video" : "Mute video"} onClick={toggleMediaMute}>{mediaMuted || mediaVolume === 0 ? <VolumeX size={23}/> : <Volume2 size={23}/>}</button>
+        <button className="video-control-button" type="button" aria-label="Toggle fullscreen" onClick={() => void requestPlayerFullscreen()}><Maximize size={22}/></button>
+        {typeof document !== "undefined" && "pictureInPictureEnabled" in document && document.pictureInPictureEnabled && <button className="video-control-button" type="button" aria-label="Picture in picture" onClick={() => void requestPlayerPictureInPicture()}><PictureInPicture2 size={22}/></button>}
+      </div>
+    </div>}
+    {loading && !failure && loadingPresentation === "spinner" && <div className="player-loading"><span className="spinner"/><span>Loading video...</span></div>}
+    {failure && <div className="player-error"><Film size={24}/><strong>Unable to play this video</strong><span className="player-reason">{failure}</span><span className="player-diagnostics">{diagnosticLines.join(" · ")}</span><button type="button" onClick={() => { setFailure(""); setAttempt((current) => current + 1); }}>Try again</button></div>}
+    {!controls && <span className="player-hint"><Command size={12}/> SPACE TO PLAY</span>}
+  </div>;
 }

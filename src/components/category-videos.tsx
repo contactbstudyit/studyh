@@ -27,7 +27,7 @@ const sortOptions: { value: VideoSort; label: string; supported: boolean }[] = [
 ];
 
 function readSort(value?: string | null): VideoSort {
-  return sortOptions.some((option) => option.value === value && option.supported) ? value as VideoSort : "latest";
+  return sortOptions.some((option) => option.value === value && option.supported) ? value as VideoSort : "random";
 }
 
 function randomOrderKey(value: string, seed: number) {
@@ -36,7 +36,7 @@ function randomOrderKey(value: string, seed: number) {
   return hash;
 }
 
-export default function CategoryVideos({ category, slug, initialSort = "latest", initialPage = 1, initialQuery = "", initialFilterOpen = false, focusSearchOnMount = false }: { category: PublicCategory; slug: string; initialSort?: string; initialPage?: number; initialQuery?: string; initialFilterOpen?: boolean; focusSearchOnMount?: boolean }) {
+export default function CategoryVideos({ category, slug, initialSort = "random", initialPage = 1, initialQuery = "", initialFilterOpen = false, focusSearchOnMount = false }: { category: PublicCategory; slug: string; initialSort?: string; initialPage?: number; initialQuery?: string; initialFilterOpen?: boolean; focusSearchOnMount?: boolean }) {
   const [query, setQuery] = useState(initialQuery);
   const [sort, setSort] = useState<VideoSort>(() => readSort(initialSort));
   const [page, setPage] = useState(initialPage);

@@ -44,8 +44,6 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
   playerOverlay?: ReactNode;
 }) {
   const shouldAutoplay = autoPlay ?? (!preloadOnly && !reelAudio);
-  const showCustomControls = reelControls && !preloadOnly;
-  const showNativeControls = controls && !reelControls;
   const allowAutomaticPlayback = autoPlay !== false;
   const [failure, setFailure] = useState("");
   const [loading, setLoading] = useState(true);
@@ -81,10 +79,20 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
   const [mediaMuted, setMediaMuted] = useState(muted);
   const [mediaVolume, setMediaVolume] = useState(1);
   const [mediaPlaybackRate, setMediaPlaybackRate] = useState(1);
+  const [mobileControls, setMobileControls] = useState(false);
   const setVideoElement = useCallback((element: HTMLVideoElement | null) => {
     videoRef.current = element;
     onVideoElement?.(element);
   }, [onVideoElement]);
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 720px)");
+    const update = () => setMobileControls(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+  const showCustomControls = (reelControls || (controls && mobileControls)) && !preloadOnly;
+  const showNativeControls = controls && !reelControls && !mobileControls;
   preloadOnlyRef.current = preloadOnly;
   warmPreloadRef.current = warmPreload;
   preloadTargetSecondsRef.current = preloadTargetSeconds;

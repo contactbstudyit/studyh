@@ -115,7 +115,7 @@ body { background: #000; color: #fff; font-family: var(--font-geist-sans), syste
 .footer > span { color: #777; }
 .watch-modal,.add-modal { background: #0a0a0a; border-color: #222; }
 .player-frame { background: #000; }
-.video-bottom-controls { position: absolute; z-index: 12; right: 0; bottom: 0; left: 0; display: flex; flex-direction: column; gap: 4px; padding: 7px 14px calc(8px + env(safe-area-inset-bottom,0px)); background: #000; color: #fff; }
+  .video-bottom-controls { position: absolute; z-index: 12; right: 0; bottom: 0; left: 0; display: flex; flex-direction: column; gap: 4px; padding: 7px 14px calc(8px + env(safe-area-inset-bottom,0px)); background: #000; color: #fff; }
 .video-timeline { --video-progress: 0%; display: block; width: 100%; height: 3px; margin: 0; border: 0; border-radius: 99px; appearance: none; background: linear-gradient(to right,#ddd 0%,#ddd var(--video-progress),#444 var(--video-progress),#444 100%); cursor: pointer; }
 .video-timeline::-webkit-slider-runnable-track { height: 3px; border-radius: 99px; background: transparent; }
 .video-timeline::-moz-range-track { height: 3px; border-radius: 99px; background: transparent; }
@@ -361,6 +361,12 @@ body { background: #000; color: #fff; font-family: var(--font-geist-sans), syste
 @media (max-width: 720px) { .site-shell .public-video-grid { grid-template-columns: minmax(0,1fr); gap: 22px; }.site-shell .public-video-grid > .video-card { width: 100%; min-width: 0; }.site-shell .public-video-grid .thumbnail-button { width: 100%; aspect-ratio: 16/9; }.site-shell .public-video-grid .thumbnail-button img { width: 100%; height: 100%; object-fit: cover; } }
 
 @media (max-width: 720px) {
+  .video-bottom-controls .video-control-row { display: grid; grid-template-columns: 37px max-content minmax(0,1fr) 34px 34px 40px; gap: clamp(8px,3vw,18px); }
+  .video-bottom-controls .video-control-row > :nth-child(1) { grid-column: 1; }
+  .video-bottom-controls .video-control-row > :nth-child(2) { grid-column: 2; }
+  .video-bottom-controls .video-control-row > :nth-child(3) { grid-column: 6; grid-row: 1; justify-self: end; }
+  .video-bottom-controls .video-control-row > :nth-child(4) { grid-column: 4; }
+  .video-bottom-controls .video-control-row > :nth-child(5) { grid-column: 5; }
   .search-box input {
     display: block;
     position: absolute;

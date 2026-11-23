@@ -490,9 +490,14 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
   }
 
   async function requestPlayerFullscreen() {
-    const frame = videoRef.current?.closest<HTMLElement>(".player-frame");
-    if (!frame) return;
+    const element = videoRef.current as (HTMLVideoElement & { webkitEnterFullscreen?: () => void }) | null;
+    const frame = element?.closest<HTMLElement>(".player-frame");
+    if (!element || !frame) return;
     try {
+      if (typeof element.webkitEnterFullscreen === "function" && /iPad|iPhone|iPod/i.test(navigator.userAgent)) {
+        element.webkitEnterFullscreen();
+        return;
+      }
       if (document.fullscreenElement === frame) await document.exitFullscreen();
       else await frame.requestFullscreen();
     } catch { /* Fullscreen may be unavailable or denied by the browser. */ }

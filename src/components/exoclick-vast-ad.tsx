@@ -124,6 +124,15 @@ export function ExoclickVastAd({ contentVideoRef, videoId }: {
   const [skipAvailable, setSkipAvailable] = useState(false);
 
   useEffect(() => {
+    if (!adActive) {
+      setSkipAvailable(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setSkipAvailable(true), 3000);
+    return () => window.clearTimeout(timer);
+  }, [adActive]);
+
+  useEffect(() => {
     const video = contentVideoRef.current;
     const container = containerRef.current;
     if (!video || !container) return;
@@ -214,7 +223,6 @@ export function ExoclickVastAd({ contentVideoRef, videoId }: {
           listen(manager, events.STARTED, () => {
             adDiagnostic("ad started");
             if (current.startTimeout) window.clearTimeout(current.startTimeout);
-            current.skipTimeout = window.setTimeout(() => setSkipAvailable(true), 3000);
             current.playbackTimeout = window.setTimeout(() => {
               adDiagnostic("ad playback watchdog expired");
               finish(current, true);

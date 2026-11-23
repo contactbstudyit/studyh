@@ -18,6 +18,7 @@ type ImaEvent = { getAdsManager?: (video: HTMLVideoElement) => ImaManager; getEr
 type ImaManager = {
   init: (width: number, height: number, mode: unknown) => void;
   start: () => void;
+  skip: () => void;
   setVolume: (volume: number) => void;
   destroy: () => void;
   addEventListener: (event: unknown, callback: (event?: ImaEvent) => void) => void;
@@ -83,6 +84,7 @@ type AdSession = {
   timeout?: number;
   startTimeout?: number;
   playbackTimeout?: number;
+  skipTimeout?: number;
   snapshot: ContentSnapshot;
   ended: boolean;
 };
@@ -119,6 +121,7 @@ export function ExoclickVastAd({ contentVideoRef, videoId }: {
   const sessionRef = useRef<AdSession | null>(null);
   const allowProgrammaticPlayRef = useRef(false);
   const [adActive, setAdActive] = useState(false);
+  const [skipAvailable, setSkipAvailable] = useState(false);
 
   useEffect(() => {
     const video = contentVideoRef.current;
@@ -150,6 +153,7 @@ export function ExoclickVastAd({ contentVideoRef, videoId }: {
       if (current.timeout) window.clearTimeout(current.timeout);
       if (current.startTimeout) window.clearTimeout(current.startTimeout);
       if (current.playbackTimeout) window.clearTimeout(current.playbackTimeout);
+      if (current.skipTimeout) window.clearTimeout(current.skipTimeout);
       for (const listener of current.listeners) listener.target.removeEventListener(listener.type, listener.callback);
       try { current.manager?.destroy(); } catch { /* Ignore IMA teardown errors. */ }
       try { current.loader?.destroy(); } catch { /* Ignore IMA teardown errors. */ }
@@ -157,6 +161,7 @@ export function ExoclickVastAd({ contentVideoRef, videoId }: {
       if (sessionRef.current === current) sessionRef.current = null;
       if (session === current) session = null;
       setAdActive(false);
+      setSkipAvailable(false);
       if (!resumeContent) return;
       const content = contentVideoRef.current;
       if (!content) return;
@@ -209,6 +214,7 @@ export function ExoclickVastAd({ contentVideoRef, videoId }: {
           listen(manager, events.STARTED, () => {
             adDiagnostic("ad started");
             if (current.startTimeout) window.clearTimeout(current.startTimeout);
+            current.skipTimeout = window.setTimeout(() => setSkipAvailable(true), 3000);
             current.playbackTimeout = window.setTimeout(() => {
               adDiagnostic("ad playback watchdog expired");
               finish(current, true);
@@ -311,6 +317,6 @@ export function ExoclickVastAd({ contentVideoRef, videoId }: {
 
   return <>
     <div ref={containerRef} className={`exoclick-ad-surface${adActive ? " active" : ""}`} aria-hidden={!adActive}/>
-    {adActive && <span className="exoclick-ad-label">Advertisement</span>}
+    {adActive && <><span className="exoclick-ad-label">Advertisement</span>{skipAvailable && <button className="exoclick-skip-button" type="button" onClick={() => { try { sessionRef.current?.manager?.skip(); } catch { /* IMA controls whether this ad is skippable. */ } }} aria-label="Skip advertisement">Skip ad</button>}</>}
   </>;
 }

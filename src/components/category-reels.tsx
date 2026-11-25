@@ -441,13 +441,28 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
     };
     const observer = new IntersectionObserver(updateVisibleReel, { root, threshold: [0.6, 0.8] });
     root.querySelectorAll<HTMLElement>("[data-feed-index]").forEach((slide) => observer.observe(slide));
-    const refreshAfterViewportChange = () => window.requestAnimationFrame(updateVisibleReel);
+    const refreshAfterViewportChange = () => {
+      root.style.scrollSnapType = "none";
+      const currentTop = root.scrollTop;
+      void root.offsetHeight;
+      root.scrollTop = currentTop;
+      window.requestAnimationFrame(() => {
+        root.style.scrollSnapType = "y mandatory";
+        updateVisibleReel();
+      });
+    };
+    const activeVideo = () => root.querySelector<HTMLVideoElement>(".reel-player-slot.active video");
     document.addEventListener("fullscreenchange", refreshAfterViewportChange);
     window.addEventListener("resize", refreshAfterViewportChange);
+    window.addEventListener("orientationchange", refreshAfterViewportChange);
+    const video = activeVideo();
+    video?.addEventListener("webkitendfullscreen", refreshAfterViewportChange as EventListener);
     return () => {
       observer.disconnect();
       document.removeEventListener("fullscreenchange", refreshAfterViewportChange);
       window.removeEventListener("resize", refreshAfterViewportChange);
+      window.removeEventListener("orientationchange", refreshAfterViewportChange);
+      video?.removeEventListener("webkitendfullscreen", refreshAfterViewportChange as EventListener);
     };
   }, [activateAd, activateReelOrLeaveAd, feedItems]);
 

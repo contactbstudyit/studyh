@@ -19,6 +19,7 @@ type PlayerSlots = Record<PlayerSlot, ReelItem | null>;
 type ReelPlaybackStatus = "loading" | "ready" | "error";
 type ReelAudioAvailability = "unknown" | "available" | "none";
 const REELS_PER_AD = 3;
+const REEL_MOBILE_QUERY = "(max-width: 720px), (max-height: 540px) and (pointer: coarse)";
 type ReelAdPlacement = { id: string; afterVideoId: string; status: "pending" | "loading" | "served" | "no-fill"; attempt: number };
 type ReelFeedItem =
   | { kind: "reel"; key: string; feedIndex: number; videoIndex: number; item: ReelItem }
@@ -328,7 +329,7 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
   }, []);
 
   useEffect(() => {
-    const breakpoint = window.matchMedia("(max-width: 720px)");
+    const breakpoint = window.matchMedia(REEL_MOBILE_QUERY);
     const update = () => setMobileViewport(breakpoint.matches);
     update();
     breakpoint.addEventListener("change", update);

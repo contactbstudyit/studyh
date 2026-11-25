@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { CSSProperties, ReactNode } from "react";
-import { Command, Film, Pause, Play, Volume2, VolumeX } from "lucide-react";
+import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode } from "react";
+import { Command, Film, Pause, Play, RotateCcw, RotateCw, Volume2, VolumeX } from "lucide-react";
 import { recordPublicVideoView } from "@/hooks/use-library";
 import type { VideoRecord } from "@/hooks/use-library";
 import { getPlaybackFailureReason, probeVideoSource, supportsNativeHls } from "@/lib/video-playback";
@@ -12,6 +12,7 @@ type WatchVideo = Omit<VideoRecord, "video_url" | "views" | "display_view_count"
 type PlaybackStatus = "loading" | "ready" | "error";
 export type ReelAudioAvailability = "unknown" | "available" | "none";
 const MAX_REEL_WARMUP_PLAYBACK_SECONDS = 1.25;
+const REEL_TAP_HINT_SESSION_KEY = "reel-tap-hint-seen";
 
 function detectNativeAudioAvailability(element: HTMLVideoElement): ReelAudioAvailability {
   const media = element as HTMLVideoElement & { audioTracks?: { length: number }; mozHasAudio?: boolean; webkitAudioDecodedByteCount?: number };
@@ -80,6 +81,10 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
   const [mediaVolume, setMediaVolume] = useState(1);
   const [mediaPlaybackRate, setMediaPlaybackRate] = useState(1);
   const [mobileControls, setMobileControls] = useState(false);
+  const [tapBurst, setTapBurst] = useState<{ id: number; action: "play" | "pause" | "back" | "forward"; x: number; y: number } | null>(null);
+  const [showReelHint, setShowReelHint] = useState(false);
+  const tapBurstTimerRef = useRef<number | null>(null);
+  const reelHintTimerRef = useRef<number | null>(null);
   const setVideoElement = useCallback((element: HTMLVideoElement | null) => {
     videoRef.current = element;
     onVideoElement?.(element);
@@ -90,6 +95,19 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
     update();
     query.addEventListener("change", update);
     return () => query.removeEventListener("change", update);
+  }, []);
+  useEffect(() => {
+    if (!reelControls || preloadOnly || !mediaPlaying || showReelHint) return;
+    let alreadySeen = false;
+    try { alreadySeen = window.sessionStorage.getItem(REEL_TAP_HINT_SESSION_KEY) === "1"; } catch { /* Storage may be unavailable. */ }
+    if (alreadySeen) return;
+    setShowReelHint(true);
+    try { window.sessionStorage.setItem(REEL_TAP_HINT_SESSION_KEY, "1"); } catch { /* Storage may be unavailable. */ }
+    reelHintTimerRef.current = window.setTimeout(() => setShowReelHint(false), 3200);
+  }, [reelControls, preloadOnly, mediaPlaying, showReelHint]);
+  useEffect(() => () => {
+    if (tapBurstTimerRef.current !== null) window.clearTimeout(tapBurstTimerRef.current);
+    if (reelHintTimerRef.current !== null) window.clearTimeout(reelHintTimerRef.current);
   }, []);
   const showCustomControls = (reelControls || (controls && mobileControls)) && !preloadOnly;
   const showNativeControls = controls && !reelControls && !mobileControls;
@@ -497,6 +515,23 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
     setMediaVolume(element.volume);
   }
 
+  function triggerTapBurst(action: "play" | "pause" | "back" | "forward", event: ReactMouseEvent<HTMLButtonElement>) {
+    const frame = event.currentTarget.closest<HTMLElement>(".player-frame");
+    if (!frame) return;
+    const rect = frame.getBoundingClientRect();
+    setTapBurst({ id: Date.now() + Math.random(), action, x: event.clientX - rect.left, y: event.clientY - rect.top });
+    setShowReelHint(false);
+    if (reelHintTimerRef.current !== null) { window.clearTimeout(reelHintTimerRef.current); reelHintTimerRef.current = null; }
+    if (tapBurstTimerRef.current !== null) window.clearTimeout(tapBurstTimerRef.current);
+    tapBurstTimerRef.current = window.setTimeout(() => setTapBurst(null), 620);
+  }
+
+  function skipReelBy(seconds: number) {
+    const element = videoRef.current;
+    if (!element) return;
+    seekMedia((Number.isFinite(element.currentTime) ? element.currentTime : mediaTime) + seconds);
+  }
+
   const remainingTime = Math.max(0, mediaDuration - mediaTime);
   const progressPercent = mediaDuration > 0 ? Math.min(100, Math.max(0, (mediaTime / mediaDuration) * 100)) : 0;
   return <div className={`player-frame${preloadOnly ? " preload-only" : ""}`} data-source-type={sourceType} aria-hidden={preloadOnly || undefined}>
@@ -512,6 +547,13 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
       onVolumeChange={(event) => { setMediaMuted(event.currentTarget.muted); setMediaVolume(event.currentTarget.volume); }}
       onError={handleMediaError}/>
     {playerOverlay}
+    {reelControls && !preloadOnly && !failure && <div className="reel-tap-overlay">
+      <button className="reel-tap-skip" type="button" aria-label="Back 5 seconds" onClick={(event) => { triggerTapBurst("back", event); skipReelBy(-5); }}><RotateCcw size={24}/><span>5</span></button>
+      <button className={`reel-tap-toggle${showReelHint ? " hinting" : ""}`} type="button" aria-label={mediaPlaying ? "Pause video" : "Play video"} onClick={(event) => { triggerTapBurst(mediaPlaying ? "pause" : "play", event); void toggleMediaPlayback(); }}>{mediaPlaying ? <Pause size={28} fill="currentColor"/> : <Play size={28} fill="currentColor"/>}</button>
+      <button className="reel-tap-skip" type="button" aria-label="Forward 5 seconds" onClick={(event) => { triggerTapBurst("forward", event); skipReelBy(5); }}><RotateCw size={24}/><span>5</span></button>
+    </div>}
+    {tapBurst && <span key={tapBurst.id} className={`reel-tap-burst burst-${tapBurst.action}`} style={{ left: tapBurst.x, top: tapBurst.y }} aria-hidden="true">{tapBurst.action === "play" ? <Play size={22} fill="currentColor"/> : tapBurst.action === "pause" ? <Pause size={22} fill="currentColor"/> : tapBurst.action === "back" ? <RotateCcw size={22}/> : <RotateCw size={22}/>}</span>}
+    {reelControls && showReelHint && <div className="reel-tap-hint" aria-hidden="true"><Play size={13} fill="currentColor"/><span>Tap to play or pause</span></div>}
     {showCustomControls && !failure && <div className="video-bottom-controls" onClick={(event) => event.stopPropagation()}>
       <input className="video-timeline" type="range" min={0} max={mediaDuration > 0 ? mediaDuration : 1} step="0.01" value={Math.min(mediaTime, mediaDuration || 0)} style={{ "--video-progress": `${progressPercent}%` } as CSSProperties} aria-label="Video progress" disabled={mediaDuration <= 0} onChange={(event) => seekMedia(Number(event.currentTarget.value))}/>
       <div className="video-control-row">

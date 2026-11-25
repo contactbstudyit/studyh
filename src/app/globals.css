@@ -607,6 +607,19 @@ nextjs-portal {
   .reel-caption h1 { display: -webkit-box; overflow: hidden; font-size: 15px; line-height: 1.35; text-overflow: ellipsis; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
   .reel-view-count { margin-top: 5px; color: rgba(255,255,255,.84); font-size: 11px; }
   .reel-caption p,.reels-page .player-hint { display: none; }
+  .reel-tap-overlay { position: absolute; z-index: 3; inset: 0; display: flex; align-items: center; justify-content: space-between; padding: 0 max(14px,6vw); pointer-events: none; }
+  .reel-tap-overlay > button { pointer-events: auto; -webkit-tap-highlight-color: transparent; }
+  .reel-tap-toggle { display: grid; width: 62px; height: 62px; place-items: center; border: 1px solid rgba(255,255,255,.3); border-radius: 50%; background: rgba(0,0,0,.32); color: #fff; transition: transform .12s ease; }
+  .reel-tap-toggle:active { transform: scale(.92); }
+  .reel-tap-toggle.hinting { animation: reel-tap-pulse 1.5s ease-in-out infinite; }
+  .reel-tap-skip { position: relative; display: grid; width: 46px; height: 46px; place-items: center; border: 0; border-radius: 50%; background: rgba(0,0,0,.3); color: rgba(255,255,255,.92); }
+  .reel-tap-skip:active { transform: scale(.92); }
+  .reel-tap-skip span { position: absolute; font-size: 9px; font-weight: 700; line-height: 1; }
+  .reel-tap-burst { position: absolute; z-index: 5; display: grid; width: 56px; height: 56px; place-items: center; border-radius: 50%; background: rgba(0,0,0,.55); color: #fff; pointer-events: none; transform: translate(-50%,-50%); animation: reel-tap-burst .6s ease-out forwards; }
+  .reel-tap-hint { position: absolute; z-index: 4; top: 42%; left: 50%; display: flex; align-items: center; gap: 6px; padding: 7px 13px; border-radius: 999px; background: rgba(0,0,0,.6); color: #fff; font-size: 12px; font-weight: 600; white-space: nowrap; pointer-events: none; transform: translate(-50%,-50%); animation: reel-tap-hint 3.2s ease forwards; }
+  @keyframes reel-tap-burst { 0% { opacity: .95; transform: translate(-50%,-50%) scale(.6); } 100% { opacity: 0; transform: translate(-50%,-50%) scale(1.6); } }
+  @keyframes reel-tap-hint { 0% { opacity: 0; transform: translate(-50%,-46%) scale(.92); } 12%,78% { opacity: 1; transform: translate(-50%,-50%) scale(1); } 100% { opacity: 0; transform: translate(-50%,-54%) scale(1); } }
+  @keyframes reel-tap-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(255,255,255,.34); } 50% { box-shadow: 0 0 0 12px rgba(255,255,255,0); } }
   .reels-mobile-nav { position: fixed; z-index: 20; right: 0; bottom: 0; left: 0; display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); align-items: center; width: 100%; height: calc(68px + env(safe-area-inset-bottom,0px)); padding: 4px 12px calc(env(safe-area-inset-bottom,0px) + 4px); border-top: 1px solid rgba(255,255,255,.1); background: linear-gradient(180deg,rgba(0,0,0,.58),rgba(0,0,0,.86)); }
   .reels-mobile-control { display: flex; min-width: 0; min-height: 44px; flex-direction: column; align-items: center; justify-content: center; gap: 3px; border: 0; padding: 0; background: transparent; color: rgba(255,255,255,.76); font: inherit; font-size: 10px; line-height: 1; text-decoration: none; cursor: pointer; -webkit-tap-highlight-color: transparent; }
   .reels-mobile-control.active { color: #fff; font-weight: 600; }

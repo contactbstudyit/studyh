@@ -553,6 +553,8 @@ nextjs-portal {
   .reel-ad-slide { background: #050505; }
   .reel-image-ad-card { position: relative; display: flex; width: 100%; height: 100%; align-items: center; justify-content: center; padding: 0; overflow: hidden; background: #050505; }
   .reel-image-ad-label { position: absolute; z-index: 3; top: calc(env(safe-area-inset-top,0px) + 12px); left: 12px; margin: 0; padding: 4px 8px; border-radius: 4px; background: rgba(0,0,0,.62); color: rgba(255,255,255,.82); font-size: 10px; letter-spacing: .5px; pointer-events: none; }
+  .exo-reel-video-ad-surface { position: relative; display: grid; width: 100%; height: 100%; place-items: center; overflow: hidden; background: #050505; }
+  .exo-reel-video-ad-video { display: block; width: 100%; height: 100%; object-fit: contain; background: #000; }
   .exo-display-frame { position: relative; display: grid; width: 100%; height: 100%; place-items: center; overflow: visible; background: transparent; }
   .exo-display-frame > * { grid-area: 1 / 1; }
   .exo-display-frame ins.eas6a97888e10 { display: grid; width: 100%; height: 100%; place-items: center; margin: 0; }

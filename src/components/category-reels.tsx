@@ -5,7 +5,7 @@ import { ArrowLeft, Clapperboard, Play, VolumeX } from "lucide-react";
 import Link from "next/link";
 import Script from "next/script";
 import { VideoPlayer } from "@/components/video-player";
-import { ExoclickImageAd } from "@/components/exoclick-image-ad";
+import { ExoclickReelVideoAd } from "@/components/exoclick-reel-video-ad";
 import type { VideoRecord } from "@/hooks/use-library";
 import PublicViewCount from "@/components/public-view-count";
 import type { VideoSourceType } from "@/lib/video-playback";
@@ -515,7 +515,7 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
                     <div className="reel-image-ad-card">
                       <span className="reel-image-ad-label">Advertisement</span>
                       {keepRendered
-                        ? <ExoclickImageAd key={`${feedItem.ad.id}-${feedItem.ad.attempt}`} slotId={feedItem.ad.id} request={feedItem.ad.status === "loading" || feedItem.ad.status === "served"} active={isActiveAd} providerReady={imageAdProviderReady} providerFailed={imageAdProviderFailed} onFilled={markAdFilled} onNoFill={skipAdPlacement}/>
+                        ? <ExoclickReelVideoAd key={`${feedItem.ad.id}-${feedItem.ad.attempt}`} slotId={feedItem.ad.id} active={isActiveAd} fallbackProviderReady={imageAdProviderReady} fallbackProviderFailed={imageAdProviderFailed} onFilled={markAdFilled} onNoFill={skipAdPlacement}/>
                         : <div className="exo-display-frame" aria-hidden="true"><div className="exo-display-skeleton"/></div>}
                     </div>
                   </article>;

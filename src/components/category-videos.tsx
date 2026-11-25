@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, Clapperboard, Clock3, Command, Filter, Play, Search } from "lucide-react";
 import Link from "next/link";
 import { useVideos } from "@/hooks/use-library";
@@ -10,6 +10,8 @@ import VideoPagination from "@/components/video-pagination";
 import gridStyles from "@/components/public-video-grid.module.css";
 import PublicViewCount from "@/components/public-view-count";
 import MobileBottomNavigation from "@/components/mobile-bottom-navigation";
+import Script from "next/script";
+import { ExoclickImageAd } from "@/components/exoclick-image-ad";
 
 const PUBLIC_PAGE_SIZE = 15;
 
@@ -43,6 +45,9 @@ export default function CategoryVideos({ category, slug, initialSort = "random",
   const [randomSeed, setRandomSeed] = useState(1);
   const [filterOpen, setFilterOpen] = useState(initialFilterOpen);
   const [searchOpen, setSearchOpen] = useState(focusSearchOnMount);
+  const [bannerProviderReady, setBannerProviderReady] = useState(false);
+  const [bannerProviderFailed, setBannerProviderFailed] = useState(false);
+  const [failedBannerIds, setFailedBannerIds] = useState<Set<string>>(() => new Set());
   const filterRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const videosHook = useVideos({ categoryId: category.id, search: query, admin: false, sort, pageNumber: page, pageSize: PUBLIC_PAGE_SIZE, dailyFeed: true });
@@ -124,6 +129,13 @@ export default function CategoryVideos({ category, slug, initialSort = "random",
     window.history.pushState(null, "", url);
   }
 
+  const hideFailedBanner = useCallback((slotId: string) => {
+    setFailedBannerIds((current) => {
+      if (current.has(slotId)) return current;
+      return new Set(current).add(slotId);
+    });
+  }, []);
+
   const totalPages = Math.ceil((videosHook.totalCount ?? 0) / PUBLIC_PAGE_SIZE);
   useEffect(() => {
     if (videosHook.totalCount === null) return;
@@ -143,7 +155,13 @@ export default function CategoryVideos({ category, slug, initialSort = "random",
       </div>
     </header>
     <section className="collection section-wrap category-results-page" id="top">
-      {videosHook.loading && videosHook.videos.length === 0 ? <div className={`video-grid public-video-grid ${gridStyles.singleColumn} skeleton-grid`} role="status" aria-label={`Loading ${category.name} videos`}>{Array.from({ length: 6 }, (_, index) => <article className="video-card skeleton-card" key={index}><div className="skeleton-thumbnail"/><div className="skeleton-title"><span/><span/></div></article>)}</div> : <div className={`video-grid public-video-grid ${gridStyles.singleColumn}`}>{displayedVideos.map((video) => <article className="video-card" key={video.id}><Link className="thumbnail-button" href={`/watch/${video.id}`} aria-label={`Watch ${video.title}`}><img loading="lazy" src={video.thumbnail_url || "/film-placeholder.svg"} alt=""/><span className="thumb-shade"/><span className="play-disc"><Play size={17} fill="currentColor"/></span>{video.duration && <span className="duration"><Clock3 size={11}/>{video.duration}</span>}</Link><Link className="card-title" href={`/watch/${video.id}`}>{video.title}</Link><PublicViewCount count={video.display_views ?? 0} className="card-view-count"/>{video.description && <p className="card-description">{video.description}</p>}</article>)}</div>}
+      <Script id="exoclick-category-banner-zone-6047522" src="https://a.magsrv.com/ad-provider.js" async type="application/javascript" strategy="afterInteractive" onReady={() => { setBannerProviderReady(true); setBannerProviderFailed(false); }} onError={() => setBannerProviderFailed(true)}/>
+      {videosHook.loading && videosHook.videos.length === 0 ? <div className={`video-grid public-video-grid ${gridStyles.singleColumn} skeleton-grid`} role="status" aria-label={`Loading ${category.name} videos`}>{Array.from({ length: 6 }, (_, index) => <article className="video-card skeleton-card" key={index}><div className="skeleton-thumbnail"/><div className="skeleton-title"><span/><span/></div></article>)}</div> : <div className={`video-grid public-video-grid ${gridStyles.singleColumn}`}>{displayedVideos.flatMap((video, index) => {
+        const card = <article className="video-card" key={video.id}><Link className="thumbnail-button" href={`/watch/${video.id}`} aria-label={`Watch ${video.title}`}><img loading="lazy" src={video.thumbnail_url || "/film-placeholder.svg"} alt=""/><span className="thumb-shade"/><span className="play-disc"><Play size={17} fill="currentColor"/></span>{video.duration && <span className="duration"><Clock3 size={11}/>{video.duration}</span>}</Link><Link className="card-title" href={`/watch/${video.id}`}>{video.title}</Link><PublicViewCount count={video.display_views ?? 0} className="card-view-count"/>{video.description && <p className="card-description">{video.description}</p>}</article>;
+        if ((index + 1) % 4 !== 0 || failedBannerIds.has(video.id)) return [card];
+        const slotId = `category-banner-${video.id}`;
+        return [card, <article className="category-banner-ad" key={slotId} aria-label="Advertisement"><ExoclickImageAd slotId={slotId} request providerReady={bannerProviderReady} providerFailed={bannerProviderFailed} onFilled={() => {}} onNoFill={hideFailedBanner}/></article>];
+      })}</div>}
       {!videosHook.loading && videosHook.totalCount === 0 && <div className="empty-state"><Search size={22}/><strong>No videos in {category.name} yet</strong><span>Check back later for new videos.</span></div>}
       <VideoPagination page={page} totalPages={totalPages} loading={videosHook.loading} onPageChange={changePage}/>
     </section>

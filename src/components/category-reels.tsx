@@ -20,7 +20,6 @@ type ReelPlaybackStatus = "loading" | "ready" | "error";
 type ReelAudioAvailability = "unknown" | "available" | "none";
 const REELS_PER_AD = 3;
 const REEL_MOBILE_QUERY = "(max-width: 720px), (max-height: 540px)";
-const REEL_LANDSCAPE_QUERY = "(max-height: 540px) and (orientation: landscape)";
 type ReelAdPlacement = { id: string; afterVideoId: string; status: "pending" | "loading" | "served" | "no-fill"; attempt: number };
 type ReelFeedItem =
   | { kind: "reel"; key: string; feedIndex: number; videoIndex: number; item: ReelItem }
@@ -41,7 +40,6 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
   const [mobileViewport, setMobileViewport] = useState<boolean | null>(null);
-  const [landscapeReels, setLandscapeReels] = useState(false);
   const [allowNextMediaWarmup, setAllowNextMediaWarmup] = useState(true);
   const [playerSlots, setPlayerSlots] = useState<PlayerSlots>({ a: null, b: null });
   const [activePlayerSlot, setActivePlayerSlot] = useState<PlayerSlot>("a");
@@ -52,7 +50,6 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
   const [imageAdProviderReady, setImageAdProviderReady] = useState(false);
   const [imageAdProviderFailed, setImageAdProviderFailed] = useState(false);
   const trackRef = useRef<HTMLDivElement>(null);
-  const landscapeReelsRef = useRef(false);
   const activeFeedIndexRef = useRef(0);
   const loadingRef = useRef(false);
   const videosRef = useRef(videos);
@@ -341,17 +338,6 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
   }, []);
 
   useEffect(() => {
-    const orientation = window.matchMedia(REEL_LANDSCAPE_QUERY);
-    const update = () => {
-      landscapeReelsRef.current = orientation.matches;
-      setLandscapeReels(orientation.matches);
-    };
-    update();
-    orientation.addEventListener("change", update);
-    return () => orientation.removeEventListener("change", update);
-  }, []);
-
-  useEffect(() => {
     const connection = (navigator as Navigator & { connection?: NetworkInformationLike }).connection;
     const update = () => {
       if (!connection) { setAllowNextMediaWarmup(true); return; }
@@ -429,17 +415,13 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
     if (!root || feedItems.length === 0) return;
     const updateVisibleReel = () => {
       const rootBounds = root.getBoundingClientRect();
-      const horizontal = landscapeReelsRef.current;
       let visibleIndex = -1;
       let visibleRatio = 0;
       let visibleSlide: HTMLElement | null = null;
       root.querySelectorAll<HTMLElement>("[data-feed-index]").forEach((slide) => {
         const rect = slide.getBoundingClientRect();
-        const visibleSpan = horizontal
-          ? Math.max(0, Math.min(rect.right, rootBounds.right) - Math.max(rect.left, rootBounds.left))
-          : Math.max(0, Math.min(rect.bottom, rootBounds.bottom) - Math.max(rect.top, rootBounds.top));
-        const totalSpan = horizontal ? rect.width : rect.height;
-        const ratio = totalSpan > 0 ? visibleSpan / totalSpan : 0;
+        const visibleHeight = Math.max(0, Math.min(rect.bottom, rootBounds.bottom) - Math.max(rect.top, rootBounds.top));
+        const ratio = rect.height > 0 ? visibleHeight / rect.height : 0;
         if (ratio > visibleRatio) {
           visibleRatio = ratio;
           visibleSlide = slide;
@@ -463,33 +445,18 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
     const observer = new IntersectionObserver(updateVisibleReel, { root, threshold: [0.6, 0.8] });
     root.querySelectorAll<HTMLElement>("[data-feed-index]").forEach((slide) => observer.observe(slide));
     const refreshAfterViewportChange = () => {
-      const horizontal = landscapeReelsRef.current;
       root.style.scrollSnapType = "none";
-      if (horizontal) root.style.overflowX = "hidden"; else root.style.overflowY = "hidden";
+      root.style.overflowY = "hidden";
       const currentTop = root.scrollTop;
-      const currentLeft = root.scrollLeft;
       void root.offsetHeight;
       window.requestAnimationFrame(() => {
         root.style.height = "0px";
         void root.offsetHeight;
         root.style.height = "";
         const activeSlide = root.querySelector<HTMLElement>(`[data-feed-index="${activeFeedIndexRef.current}"]`);
-        if (activeSlide) {
-          root.scrollTop = activeSlide.offsetTop;
-          root.scrollLeft = activeSlide.offsetLeft;
-        } else {
-          root.scrollTop = currentTop;
-          root.scrollLeft = currentLeft;
-        }
-        if (horizontal) {
-          root.style.overflowY = "hidden";
-          root.style.overflowX = "auto";
-          root.style.scrollSnapType = "x mandatory";
-        } else {
-          root.style.overflowX = "";
-          root.style.overflowY = "auto";
-          root.style.scrollSnapType = "y mandatory";
-        }
+        root.scrollTop = activeSlide ? activeSlide.offsetTop : currentTop;
+        root.style.overflowY = "auto";
+        root.style.scrollSnapType = "y mandatory";
         updateVisibleReel();
       });
     };
@@ -578,14 +545,14 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
              {loadingMore && <div className="reels-load-status" role="status">Loading more reels...</div>}
              {error && videos.length > 0 && <div className="reels-load-status" role="alert"><span>{error}</span><button className="button-secondary" type="button" onClick={() => void loadPage(page + 1)}>Try again</button></div>}
              {!hasMore && videos.length > 0 && <div className="reels-load-status end">You are all caught up.</div>}
-              {mobileViewport === true && <div className="reels-player-layer" aria-label="Active Reel playback" style={landscapeReels ? { height: "100%", width: `${feedItems.length * 100}vw` } : { height: `${feedItems.length * 100}dvh` }}>
+              {mobileViewport === true && <div className="reels-player-layer" aria-label="Active Reel playback" style={{ height: `${feedItems.length * 100}dvh` }}>
                {(["a", "b"] as const).map((slot) => {
                   const item = playerSlots[slot];
                   if (!item) return null;
                   const isActive = slot === activePlayerSlot;
                     const preloadPriority = preloadPlan.find((candidate) => candidate.videoId === item.video.id);
                     const slotIndex = reelFeedPositions.get(item.video.id) ?? 0;
-                    return <div className={`reel-player-slot ${isActive ? "active" : "preparing"}`} aria-hidden={!isActive} key={slot} style={landscapeReels ? { top: 0, left: `${Math.max(0, slotIndex) * 100}vw` } : { top: `${Math.max(0, slotIndex) * 100}dvh`, left: 0 }}>
+                    return <div className={`reel-player-slot ${isActive ? "active" : "preparing"}`} aria-hidden={!isActive} key={slot} style={{ top: `${Math.max(0, slotIndex) * 100}dvh` }}>
                         <VideoPlayer key={slot} video={item.video} playbackUrl={item.playbackUrl} playbackType={item.playbackType} sourceHost={item.sourceHost} muted={!isActive} reelAudio controls={false} reelControls={isActive} preloadOnly={!isActive} warmPreload={isActive || Boolean(preloadPriority?.mediaWarmup)} preloadTargetSeconds={preloadPriority?.targetSeconds || 4} loadingPresentation="external" onVideoElement={slot === "a" ? setSlotAVideoElement : setSlotBVideoElement} onPlaybackStarted={isActive ? onNormalReelPlaybackStarted : undefined} onPlaybackStatusChange={(videoId, status) => reportSlotPlaybackStatus(slot, videoId, status)} onAudioAvailabilityChange={(videoId, availability) => reportSlotAudioAvailability(slot, videoId, availability)}/>
                     {isActive && <div className={`reels-video-skeleton${activePlaybackStatus === "ready" ? " ready" : activePlaybackStatus === "error" ? " failed" : ""}`} aria-hidden="true"><div className="reels-skeleton-caption"><span className="reels-skeleton-title long"/><span className="reels-skeleton-title short"/><span className="reels-skeleton-views"/></div></div>}
                      {isActive && <div className="reel-caption mobile-reel-caption"><h1>{item.video.title}</h1><PublicViewCount count={item.displayViews} className="reel-view-count"/></div>}

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
-import { Command, Film, Maximize, Pause, Play, Volume2, VolumeX } from "lucide-react";
+import { Command, Film, Pause, Play, Volume2, VolumeX } from "lucide-react";
 import { recordPublicVideoView } from "@/hooks/use-library";
 import type { VideoRecord } from "@/hooks/use-library";
 import { getPlaybackFailureReason, probeVideoSource, supportsNativeHls } from "@/lib/video-playback";
@@ -497,20 +497,6 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
     setMediaVolume(element.volume);
   }
 
-  async function requestPlayerFullscreen() {
-    const element = videoRef.current as (HTMLVideoElement & { webkitEnterFullscreen?: () => void }) | null;
-    const frame = element?.closest<HTMLElement>(".player-frame");
-    if (!element || !frame) return;
-    try {
-      if (typeof element.webkitEnterFullscreen === "function" && /iPad|iPhone|iPod/i.test(navigator.userAgent)) {
-        element.webkitEnterFullscreen();
-        return;
-      }
-      if (document.fullscreenElement === frame) await document.exitFullscreen();
-      else await frame.requestFullscreen();
-    } catch { /* Fullscreen may be unavailable or denied by the browser. */ }
-  }
-
   const remainingTime = Math.max(0, mediaDuration - mediaTime);
   const progressPercent = mediaDuration > 0 ? Math.min(100, Math.max(0, (mediaTime / mediaDuration) * 100)) : 0;
   return <div className={`player-frame${preloadOnly ? " preload-only" : ""}`} data-source-type={sourceType} aria-hidden={preloadOnly || undefined}>
@@ -533,7 +519,6 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
         <span className="video-time-remaining">-{formatMediaTime(remainingTime)}{mediaDuration > 0 && <span className="video-time-total"> / {formatMediaTime(mediaDuration)}</span>}</span>
         <button className="video-control-button video-speed-button" type="button" aria-label={`Playback speed ${mediaPlaybackRate}x`} onClick={cycleMediaPlaybackRate}>{mediaPlaybackRate}x</button>
         <button className="video-control-button" type="button" aria-label={mediaMuted || mediaVolume === 0 ? "Unmute video" : "Mute video"} onClick={toggleMediaMute}>{mediaMuted || mediaVolume === 0 ? <VolumeX size={23}/> : <Volume2 size={23}/>}</button>
-        <button className="video-control-button" type="button" aria-label="Toggle fullscreen" onClick={() => void requestPlayerFullscreen()}><Maximize size={22}/></button>
       </div>
     </div>}
     {loading && !failure && loadingPresentation === "spinner" && <div className="player-loading"><span className="spinner"/><span>Loading video...</span></div>}

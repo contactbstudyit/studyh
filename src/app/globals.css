@@ -357,12 +357,11 @@ body { background: #000; color: #fff; font-family: var(--font-geist-sans), syste
 @media (max-width: 720px) { .site-shell .public-video-grid { grid-template-columns: minmax(0,1fr); gap: 22px; }.site-shell .public-video-grid > .video-card { width: 100%; min-width: 0; }.site-shell .public-video-grid .thumbnail-button { width: 100%; aspect-ratio: 16/9; }.site-shell .public-video-grid .thumbnail-button img { width: 100%; height: 100%; object-fit: cover; } }
 
 @media (max-width: 720px) {
-  .video-bottom-controls .video-control-row { display: grid; grid-template-columns: 37px max-content minmax(0,1fr) 34px 34px 40px; gap: clamp(8px,3vw,18px); }
+  .video-bottom-controls .video-control-row { display: grid; grid-template-columns: 37px max-content minmax(0,1fr) 34px 40px; gap: clamp(8px,3vw,18px); }
   .video-bottom-controls .video-control-row > :nth-child(1) { grid-column: 1; }
   .video-bottom-controls .video-control-row > :nth-child(2) { grid-column: 2; }
-  .video-bottom-controls .video-control-row > :nth-child(3) { grid-column: 6; grid-row: 1; justify-self: end; }
+  .video-bottom-controls .video-control-row > :nth-child(3) { grid-column: 5; grid-row: 1; justify-self: end; }
   .video-bottom-controls .video-control-row > :nth-child(4) { grid-column: 4; }
-  .video-bottom-controls .video-control-row > :nth-child(5) { grid-column: 5; }
   .search-box input {
     display: block;
     position: absolute;
@@ -570,13 +569,12 @@ nextjs-portal {
   .reel-player-slot.active { z-index: 1; }
   .reel-player-slot.preparing { z-index: 0; }
   .reel-player-slot.active .video-bottom-controls { pointer-events: auto; touch-action: manipulation; }
-  .reel-player-slot.active .video-control-row { display: grid; grid-template-columns: 37px max-content minmax(0,1fr) 34px 34px 40px; gap: clamp(8px,3vw,18px); }
+  .reel-player-slot.active .video-control-row { display: grid; grid-template-columns: 37px max-content minmax(0,1fr) 34px 40px; gap: clamp(8px,3vw,18px); }
   .reel-player-slot.active .video-control-row > :nth-child(1) { grid-column: 1; }
   .reel-player-slot.active .video-control-row > :nth-child(2) { grid-column: 2; }
-  .reel-player-slot.active .video-control-row > :nth-child(3) { grid-column: 6; grid-row: 1; justify-self: end; }
+  .reel-player-slot.active .video-control-row > :nth-child(3) { grid-column: 5; grid-row: 1; justify-self: end; }
   .reel-player-slot.active .video-control-row > :nth-child(4) { grid-column: 4; }
-  .reel-player-slot.active .video-control-row > :nth-child(5) { grid-column: 5; }
-  @media (max-width: 360px) { .reel-player-slot.active .video-control-row { grid-template-columns: 32px max-content minmax(0,1fr) 28px 28px 36px; gap: 4px; }.reel-player-slot.active .video-time-remaining { font-size: 10px; } }
+  @media (max-width: 360px) { .reel-player-slot.active .video-control-row { grid-template-columns: 32px max-content minmax(0,1fr) 28px 36px; gap: 4px; }.reel-player-slot.active .video-time-remaining { font-size: 10px; } }
   .reels-player-layer .player-frame:not(.preload-only) { position: absolute; inset: 0; width: 100%; height: 100%; max-height: none; aspect-ratio: auto; overflow: hidden; border-radius: 0; }
   .reels-player-layer .player-error { pointer-events: auto; }
   .reels-page .player-frame.preload-only { position: absolute; inset: 0; z-index: 0; width: 100%; height: 100%; max-height: none; aspect-ratio: auto; overflow: hidden; opacity: 0; pointer-events: none; }

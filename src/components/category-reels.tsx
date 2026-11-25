@@ -411,7 +411,7 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
   useEffect(() => {
     const root = trackRef.current;
     if (!root || feedItems.length === 0) return;
-    const observer = new IntersectionObserver(() => {
+    const updateVisibleReel = () => {
       const rootBounds = root.getBoundingClientRect();
       let visibleIndex = -1;
       let visibleRatio = 0;
@@ -438,9 +438,17 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
           activateReelOrLeaveAd(videoIndex);
         }
       }
-    }, { root, threshold: [0.6, 0.8] });
+    };
+    const observer = new IntersectionObserver(updateVisibleReel, { root, threshold: [0.6, 0.8] });
     root.querySelectorAll<HTMLElement>("[data-feed-index]").forEach((slide) => observer.observe(slide));
-    return () => observer.disconnect();
+    const refreshAfterViewportChange = () => window.requestAnimationFrame(updateVisibleReel);
+    document.addEventListener("fullscreenchange", refreshAfterViewportChange);
+    window.addEventListener("resize", refreshAfterViewportChange);
+    return () => {
+      observer.disconnect();
+      document.removeEventListener("fullscreenchange", refreshAfterViewportChange);
+      window.removeEventListener("resize", refreshAfterViewportChange);
+    };
   }, [activateAd, activateReelOrLeaveAd, feedItems]);
 
   useEffect(() => {

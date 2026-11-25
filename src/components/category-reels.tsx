@@ -443,28 +443,37 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
     root.querySelectorAll<HTMLElement>("[data-feed-index]").forEach((slide) => observer.observe(slide));
     const refreshAfterViewportChange = () => {
       root.style.scrollSnapType = "none";
+      root.style.overflowY = "hidden";
       const currentTop = root.scrollTop;
       void root.offsetHeight;
-      root.scrollTop = currentTop;
       window.requestAnimationFrame(() => {
+        root.style.height = "0px";
+        void root.offsetHeight;
+        root.style.height = "";
+        root.scrollTop = currentTop;
+        root.style.overflowY = "auto";
         root.style.scrollSnapType = "y mandatory";
         updateVisibleReel();
       });
     };
     const activeVideo = () => root.querySelector<HTMLVideoElement>(".reel-player-slot.active video");
     document.addEventListener("fullscreenchange", refreshAfterViewportChange);
+    document.addEventListener("webkitfullscreenchange", refreshAfterViewportChange as EventListener);
     window.addEventListener("resize", refreshAfterViewportChange);
     window.addEventListener("orientationchange", refreshAfterViewportChange);
+    window.visualViewport?.addEventListener("resize", refreshAfterViewportChange);
     const video = activeVideo();
     video?.addEventListener("webkitendfullscreen", refreshAfterViewportChange as EventListener);
     return () => {
       observer.disconnect();
       document.removeEventListener("fullscreenchange", refreshAfterViewportChange);
+      document.removeEventListener("webkitfullscreenchange", refreshAfterViewportChange as EventListener);
       window.removeEventListener("resize", refreshAfterViewportChange);
       window.removeEventListener("orientationchange", refreshAfterViewportChange);
+      window.visualViewport?.removeEventListener("resize", refreshAfterViewportChange);
       video?.removeEventListener("webkitendfullscreen", refreshAfterViewportChange as EventListener);
     };
-  }, [activateAd, activateReelOrLeaveAd, feedItems]);
+  }, [activateAd, activateReelOrLeaveAd, activePlayerSlot, feedItems]);
 
   useEffect(() => {
     const remainingVideos = mobileViewport === true ? 4 : 2;

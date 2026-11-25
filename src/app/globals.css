@@ -545,7 +545,7 @@ nextjs-portal {
 .reels-empty > a { margin-top: 4px; color: #ccc; font-size: 11px; text-decoration: underline; text-underline-offset: 3px; }
 .reels-load-status { display: flex; min-height: 64px; flex-wrap: wrap; align-items: center; justify-content: center; gap: 12px; padding: 14px 16px; color: #999; font-size: 10px; }
 .reels-mobile-nav { display: none; }
-@media (max-width: 720px), (max-height: 540px) and (pointer: coarse) {
+@media (max-width: 720px), (max-height: 540px) {
   .reels-page { position: relative; display: block; width: 100%; height: 100vh; height: 100dvh; min-height: 0; overflow: hidden; }
   .reels-page .reels-topbar { display: none; }
   .reels-track { position: absolute; z-index: 1; inset: 0; width: 100%; height: 100%; touch-action: pan-y; -webkit-overflow-scrolling: touch; }
@@ -616,15 +616,26 @@ nextjs-portal {
 
 }
 
-@media (max-height: 540px) and (pointer: coarse) and (orientation: landscape) {
+@media (max-height: 540px) and (orientation: landscape) {
+  .reels-page { width: 100vw; height: 100dvh; }
   .reels-page .reels-track { display: flex; flex-direction: row; align-items: stretch; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory; overscroll-behavior-x: contain; overscroll-behavior-y: none; touch-action: pan-x; }
-  .reels-page .reel-slide { flex: 0 0 100%; width: 100%; height: 100%; min-height: 0; scroll-snap-align: start; scroll-snap-stop: always; }
+  .reels-page .reel-slide { flex: 0 0 100%; width: 100%; height: 100%; min-height: 0; padding: 0; scroll-snap-align: start; scroll-snap-stop: always; }
   .reels-page .reels-load-status { flex: 0 0 100%; height: 100%; }
   .reels-page .reels-player-layer { height: 100%; }
   .reels-page .reel-player-slot { top: 0; right: auto; width: 100vw; height: 100%; }
-  .reels-page .reels-player-layer .player-frame video,.reels-page .reel-media .player-frame video { object-fit: contain; }
+  .reels-page .reel-card { position: absolute; inset: 0; width: 100%; height: 100%; max-height: none; }
+  .reels-page .reel-media { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; border-radius: 0; }
+  .reels-page .reels-player-layer .player-frame,.reels-page .reel-media .player-frame { position: absolute; inset: 0; width: 100%; height: 100%; max-height: none; aspect-ratio: auto; border-radius: 0; }
+  .reels-page .reels-player-layer .player-frame video,.reels-page .reel-media .player-frame video { width: 100%; height: 100%; object-fit: cover; }
+  .reels-page .reel-poster { width: 100%; height: 100%; object-fit: cover; }
   .reels-page .reel-tap-zone { touch-action: pan-x; }
-  .reels-page .mobile-reel-caption { bottom: calc(env(safe-area-inset-bottom,0px) + 76px); }
+  .reels-page .reel-player-slot.active .video-bottom-controls { background: linear-gradient(180deg,transparent 0%,rgba(0,0,0,.72) 42%,rgba(0,0,0,.9) 100%); }
+  .reels-page .reel-player-slot.active .video-timeline { margin-top: 6px; }
+  .reels-page .mobile-reel-caption { right: 18px; bottom: calc(env(safe-area-inset-bottom,0px) + 64px); left: 18px; }
+  .reels-page .reel-player-slot.active::after,.reels-page .reel-card::after { height: 100%; background: linear-gradient(180deg,rgba(0,0,0,.28) 0%,transparent 28%,transparent 58%,rgba(0,0,0,.82) 100%); }
+  .reels-page .reels-video-skeleton { background: #101114; }
+  .reels-page .reels-video-skeleton::before { display: none; }
+  .reels-page .reels-skeleton-caption { right: 18px; bottom: calc(env(safe-area-inset-bottom,0px) + 60px); left: 18px; }
 }
 
 .thumbnail-button img,

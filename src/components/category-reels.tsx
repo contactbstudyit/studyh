@@ -19,8 +19,8 @@ type PlayerSlots = Record<PlayerSlot, ReelItem | null>;
 type ReelPlaybackStatus = "loading" | "ready" | "error";
 type ReelAudioAvailability = "unknown" | "available" | "none";
 const REELS_PER_AD = 3;
-const REEL_MOBILE_QUERY = "(max-width: 720px), (max-height: 540px) and (pointer: coarse)";
-const REEL_LANDSCAPE_QUERY = "(max-height: 540px) and (pointer: coarse) and (orientation: landscape)";
+const REEL_MOBILE_QUERY = "(max-width: 720px), (max-height: 540px)";
+const REEL_LANDSCAPE_QUERY = "(max-height: 540px) and (orientation: landscape)";
 type ReelAdPlacement = { id: string; afterVideoId: string; status: "pending" | "loading" | "served" | "no-fill"; attempt: number };
 type ReelFeedItem =
   | { kind: "reel"; key: string; feedIndex: number; videoIndex: number; item: ReelItem }

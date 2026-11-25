@@ -86,6 +86,10 @@ export function ExoclickReelVideoAd({ slotId, active, fallbackProviderReady, fal
     };
     const begin = (ima: ReelImaNamespace) => {
       if (!mounted) return;
+      video.muted = true;
+      video.defaultMuted = true;
+      video.playsInline = true;
+      video.setAttribute("playsinline", "");
       const display = new ima.AdDisplayContainer(surface, video);
       display.initialize();
       const loader = new ima.AdsLoader(display);
@@ -101,6 +105,7 @@ export function ExoclickReelVideoAd({ slotId, active, fallbackProviderReady, fal
         manager.addEventListener(ima.AdEvent.Type.CONTENT_RESUME_REQUESTED, () => finish(true));
         manager.init(surface.clientWidth, surface.clientHeight, ima.ViewMode.NORMAL);
         manager.start();
+        void video.play().catch(() => { /* Mobile browsers may require the Reel tap before starting ad media. */ });
       });
       loader.addEventListener(ima.AdErrorEvent.Type.AD_ERROR, () => finish(false));
       const request = new ima.AdsRequest();
@@ -132,7 +137,7 @@ export function ExoclickReelVideoAd({ slotId, active, fallbackProviderReady, fal
   }, [active]);
 
   if (fallback) return <ExoclickImageAd slotId={slotId} request active={active} providerReady={fallbackProviderReady} providerFailed={fallbackProviderFailed} onFilled={onFilled} onNoFill={onNoFill}/>;
-  return <div ref={surfaceRef} className="exo-reel-video-ad-surface">
+  return <div ref={surfaceRef} className="exo-reel-video-ad-surface" onClick={() => { const video = videoRef.current; if (video) { video.muted = true; void video.play().catch(() => {}); } }}>
     <video ref={videoRef} className="exo-reel-video-ad-video" muted playsInline aria-label="Advertisement"/>
     {!started && <span className="reel-image-ad-label">Advertisement</span>}
   </div>;

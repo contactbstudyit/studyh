@@ -510,12 +510,14 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
               {feedItems.map((feedItem) => {
                 if (feedItem.kind === "ad") {
                   const isActiveAd = activeAdId === feedItem.ad.id;
-                  const keepRendered = isActiveAd || feedItem.ad.status === "loading" || feedItem.ad.status === "served";
+                  const adVideoIndex = videos.findIndex((video) => video.video.id === feedItem.ad.afterVideoId);
+                  const prepareAd = mobileViewport === true && adVideoIndex >= 0 && activeIndex >= adVideoIndex - 2 && activeIndex <= adVideoIndex;
+                  const keepRendered = prepareAd || isActiveAd || feedItem.ad.status === "loading" || feedItem.ad.status === "served";
                   return <article className="reel-slide reel-ad-slide" data-feed-index={feedItem.feedIndex} data-feed-type="ad" data-ad-id={feedItem.ad.id} key={feedItem.key} aria-label="Advertisement">
                     <div className="reel-image-ad-card">
                       <span className="reel-image-ad-label">Advertisement</span>
                       {keepRendered
-                        ? <ExoclickReelVideoAd key={`${feedItem.ad.id}-${feedItem.ad.attempt}`} slotId={feedItem.ad.id} active={isActiveAd} fallbackProviderReady={imageAdProviderReady} fallbackProviderFailed={imageAdProviderFailed} onFilled={markAdFilled} onNoFill={skipAdPlacement}/>
+                        ? <ExoclickReelVideoAd key={`${feedItem.ad.id}-${feedItem.ad.attempt}`} slotId={feedItem.ad.id} active={isActiveAd} prepare={prepareAd} fallbackProviderReady={imageAdProviderReady} fallbackProviderFailed={imageAdProviderFailed} onFilled={markAdFilled} onNoFill={skipAdPlacement}/>
                         : <div className="exo-display-frame" aria-hidden="true"><div className="exo-display-skeleton"/></div>}
                     </div>
                   </article>;

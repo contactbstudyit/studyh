@@ -49,9 +49,10 @@ function loadIma(): Promise<ReelImaNamespace> {
   return window.__exoReelImaSdkPromise;
 }
 
-export function ExoclickReelVideoAd({ slotId, active, fallbackProviderReady, fallbackProviderFailed, onFilled, onNoFill }: {
+export function ExoclickReelVideoAd({ slotId, active, prepare = false, fallbackProviderReady, fallbackProviderFailed, onFilled, onNoFill }: {
   slotId: string;
   active: boolean;
+  prepare?: boolean;
   fallbackProviderReady: boolean;
   fallbackProviderFailed: boolean;
   onFilled: (slotId: string) => void;
@@ -59,14 +60,15 @@ export function ExoclickReelVideoAd({ slotId, active, fallbackProviderReady, fal
 }) {
   const surfaceRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const sessionRef = useRef<{ manager?: ReelImaManager; loader?: ReelImaLoader; display?: { destroy: () => void }; ended: boolean } | null>(null);
+  const sessionRef = useRef<{ manager?: ReelImaManager; loader?: ReelImaLoader; display?: { destroy: () => void }; ended: boolean; started: boolean } | null>(null);
   const activeRef = useRef(active);
+  const startAdRef = useRef<() => void>(() => {});
   const [fallback, setFallback] = useState(false);
   const [started, setStarted] = useState(false);
   activeRef.current = active;
 
   useEffect(() => {
-    if (!active || fallback || sessionRef.current) return;
+    if ((!active && !prepare) || fallback || sessionRef.current) return;
     const surface = surfaceRef.current;
     const video = videoRef.current;
     if (!surface || !video) return;
@@ -94,12 +96,22 @@ export function ExoclickReelVideoAd({ slotId, active, fallbackProviderReady, fal
       const display = new ima.AdDisplayContainer(surface, video);
       display.initialize();
       const loader = new ima.AdsLoader(display);
-      const session: { display: typeof display; loader: ReelImaLoader; manager?: ReelImaManager; ended: boolean } = { display, loader, ended: false };
+      const session: { display: typeof display; loader: ReelImaLoader; manager?: ReelImaManager; ended: boolean; started: boolean } = { display, loader, ended: false, started: false };
       sessionRef.current = session;
       loader.addEventListener(ima.AdsManagerLoadedEvent.Type.ADS_MANAGER_LOADED, (event) => {
         if (!event?.getAdsManager || session.ended) return;
         const manager = event.getAdsManager();
         session.manager = manager;
+        const startAd = () => {
+          if (session.ended || session.started) return;
+          session.started = true;
+          manager.init(surface.clientWidth, surface.clientHeight, ima.ViewMode.NORMAL);
+          manager.setVolume?.(0);
+          video.muted = true;
+          manager.start();
+          void video.play().catch(() => { /* Muted autoplay can still be blocked until a Reel gesture. */ });
+        };
+        startAdRef.current = startAd;
         manager.addEventListener(ima.AdEvent.Type.STARTED, () => {
           video.muted = true;
           manager.setVolume?.(0);
@@ -110,11 +122,7 @@ export function ExoclickReelVideoAd({ slotId, active, fallbackProviderReady, fal
         manager.addEventListener(ima.AdEvent.Type.COMPLETE, () => finish(true));
         manager.addEventListener(ima.AdEvent.Type.ALL_ADS_COMPLETED, () => finish(true));
         manager.addEventListener(ima.AdEvent.Type.CONTENT_RESUME_REQUESTED, () => finish(true));
-        manager.init(surface.clientWidth, surface.clientHeight, ima.ViewMode.NORMAL);
-        manager.setVolume?.(0);
-        video.muted = true;
-        manager.start();
-        void video.play().catch(() => { /* Mobile browsers may require the Reel tap before starting ad media. */ });
+        if (activeRef.current) startAd();
       });
       loader.addEventListener(ima.AdErrorEvent.Type.AD_ERROR, () => finish(false));
       const request = new ima.AdsRequest();
@@ -136,7 +144,11 @@ export function ExoclickReelVideoAd({ slotId, active, fallbackProviderReady, fal
       mounted = false;
       if (activeRef.current === active) finish(false);
     };
-  }, [active, fallback, onFilled, slotId]);
+  }, [active, fallback, onFilled, prepare, slotId]);
+
+  useEffect(() => {
+    if (active) startAdRef.current();
+  }, [active]);
 
   useEffect(() => {
     const video = videoRef.current;

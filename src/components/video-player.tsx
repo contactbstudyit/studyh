@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode } from "react";
-import { Command, Film, Pause, Play, RotateCcw, RotateCw, Volume2, VolumeX } from "lucide-react";
+import { Command, Film, Maximize, Pause, Play, RotateCcw, RotateCw, Volume2, VolumeX } from "lucide-react";
 import { recordPublicVideoView } from "@/hooks/use-library";
 import type { VideoRecord } from "@/hooks/use-library";
 import { getPlaybackFailureReason, probeVideoSource, supportsNativeHls } from "@/lib/video-playback";
@@ -502,6 +502,15 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
     setMediaVolume(element.volume);
   }
 
+  async function requestMediaFullscreen() {
+    const element = videoRef.current;
+    if (!element) return;
+    try {
+      if (element.requestFullscreen) await element.requestFullscreen();
+      else (element as HTMLVideoElement & { webkitEnterFullscreen?: () => void }).webkitEnterFullscreen?.();
+    } catch { /* Fullscreen can be blocked by the browser or preview iframe. */ }
+  }
+
   function triggerTapBurst(action: "play" | "pause" | "back" | "forward", event: ReactMouseEvent<HTMLButtonElement>) {
     const frame = event.currentTarget.closest<HTMLElement>(".player-frame");
     if (!frame) return;
@@ -543,8 +552,9 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
       <div className="video-control-row">
         <button className="video-control-button video-play-toggle" type="button" aria-label={mediaPlaying ? "Pause video" : "Play video"} onClick={() => void toggleMediaPlayback()}>{mediaPlaying ? <Pause size={25} fill="currentColor"/> : <Play size={25} fill="currentColor"/>}</button>
         <span className="video-time-remaining">-{formatMediaTime(remainingTime)}{mediaDuration > 0 && <span className="video-time-total"> / {formatMediaTime(mediaDuration)}</span>}</span>
-        <button className="video-control-button video-speed-button" type="button" aria-label={`Playback speed ${mediaPlaybackRate}x`} onClick={cycleMediaPlaybackRate}>{mediaPlaybackRate}x</button>
-        <button className="video-control-button" type="button" aria-label={mediaMuted || mediaVolume === 0 ? "Unmute video" : "Mute video"} onClick={toggleMediaMute}>{mediaMuted || mediaVolume === 0 ? <VolumeX size={23}/> : <Volume2 size={23}/>}</button>
+         <button className="video-control-button video-speed-button" type="button" aria-label={`Playback speed ${mediaPlaybackRate}x`} onClick={cycleMediaPlaybackRate}>{mediaPlaybackRate}x</button>
+         <button className="video-control-button" type="button" aria-label={mediaMuted || mediaVolume === 0 ? "Unmute video" : "Mute video"} onClick={toggleMediaMute}>{mediaMuted || mediaVolume === 0 ? <VolumeX size={23}/> : <Volume2 size={23}/>}</button>
+         {!reelControls && <button className="video-control-button video-fullscreen-button" type="button" aria-label="Enter fullscreen" onClick={() => void requestMediaFullscreen()}><Maximize size={23}/></button>}
       </div>
     </div>}
     {loading && !failure && loadingPresentation === "spinner" && <div className="player-loading"><span className="spinner"/><span>Loading video...</span></div>}

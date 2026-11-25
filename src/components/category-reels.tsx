@@ -18,7 +18,7 @@ type PlayerSlot = "a" | "b";
 type PlayerSlots = Record<PlayerSlot, ReelItem | null>;
 type ReelPlaybackStatus = "loading" | "ready" | "error";
 type ReelAudioAvailability = "unknown" | "available" | "none";
-const REELS_PER_AD = 3;
+const REELS_PER_AD = 4;
 const REEL_MOBILE_QUERY = "(max-width: 720px), (max-height: 540px)";
 type ReelAdPlacement = { id: string; afterVideoId: string; status: "pending" | "loading" | "served" | "no-fill"; attempt: number };
 type ReelFeedItem =
@@ -58,10 +58,7 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
   const activePlayerSlotRef = useRef(activePlayerSlot);
   const adPlacementsRef = useRef(adPlacements);
   const activeAdIdRef = useRef(activeAdId);
-  const countedReelIdsRef = useRef(new Set<string>());
-  const reelCountSinceAdRef = useRef(0);
   const adThresholdReachedAtRef = useRef<number | null>(null);
-  const adPlacementSequenceRef = useRef(0);
   const pendingAdIdRef = useRef<string | null>(null);
   const suppressedFailedAdIdRef = useRef<string | null>(null);
   const slotVideoElementsRef = useRef<Record<PlayerSlot, HTMLVideoElement | null>>({ a: null, b: null });
@@ -137,20 +134,21 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
       const visitorId = visitorIdRef.current;
       if (visitorId) void fetch("/api/public/reels/impression", { method: "POST", headers: { "Content-Type": "application/json", "x-reel-visitor-id": visitorId }, body: JSON.stringify({ videoId, watched: true }), keepalive: true }).catch(() => {});
     }
-    if (mobileViewport !== true || countedReelIdsRef.current.has(videoId)) return;
-    countedReelIdsRef.current.add(videoId);
-    reelCountSinceAdRef.current += 1;
-    if (reelCountSinceAdRef.current < REELS_PER_AD || pendingAdIdRef.current) return;
-    const videoIndex = videosRef.current.findIndex((item) => item.video.id === videoId);
-    const currentVideo = videosRef.current[Math.max(videoIndex, activeIndexRef.current)] ?? videosRef.current[videoIndex];
-    if (!currentVideo) return;
-    const id = `exo-display-${++adPlacementSequenceRef.current}`;
-    adThresholdReachedAtRef.current = performance.now();
-    const next = [...adPlacementsRef.current, { id, afterVideoId: currentVideo.video.id, status: "pending" as const, attempt: 0 }];
-    updateAdPlacements(next);
-    pendingAdIdRef.current = id;
-    reelCountSinceAdRef.current = 0;
-  }, [mobileViewport, updateAdPlacements]);
+  }, []);
+
+  useEffect(() => {
+    if (mobileViewport !== true) return;
+    const existingAnchors = new Set(adPlacementsRef.current.map((ad) => ad.afterVideoId));
+    const additions: ReelAdPlacement[] = [];
+    for (let group = 1; group * REELS_PER_AD <= videos.length; group += 1) {
+      const anchor = videos[group * REELS_PER_AD - 1];
+      if (!anchor || existingAnchors.has(anchor.video.id)) continue;
+      existingAnchors.add(anchor.video.id);
+      additions.push({ id: `exo-display-${anchor.video.id}`, afterVideoId: anchor.video.id, status: "pending", attempt: 0 });
+    }
+    if (additions.length === 0) return;
+    updateAdPlacements([...adPlacementsRef.current, ...additions]);
+  }, [mobileViewport, updateAdPlacements, videos]);
 
   const recordReelImpression = useCallback((videoId: string) => {
     if (impressedReelIdsRef.current.has(videoId)) return;
@@ -266,9 +264,6 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
       pendingAdIdRef.current = null;
       activeAdIdRef.current = null;
       setActiveAdId(null);
-      countedReelIdsRef.current.clear();
-      reelCountSinceAdRef.current = 0;
-      adPlacementSequenceRef.current = 0;
       pausedReelForAdRef.current = null;
       setLoading(true);
       setVideos([]);
@@ -358,10 +353,6 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
           activeAdIdRef.current = null;
           setActiveAdId(null);
           pausedReelForAdRef.current = null;
-        }
-        if (reelCountSinceAdRef.current > 0 || countedReelIdsRef.current.size > 0) {
-          reelCountSinceAdRef.current = 0;
-          countedReelIdsRef.current.clear();
         }
       }
       if (mobileViewport === false && (playerSlotsRef.current.a || playerSlotsRef.current.b)) {
@@ -524,7 +515,7 @@ export default function CategoryReels({ slug, categoryName }: { slug: string; ca
                     <div className="reel-image-ad-card">
                       <span className="reel-image-ad-label">Advertisement</span>
                       {keepRendered
-                        ? <ExoclickImageAd key={`${feedItem.ad.id}-${feedItem.ad.attempt}`} slotId={feedItem.ad.id} request={feedItem.ad.status === "loading" || feedItem.ad.status === "served"} providerReady={imageAdProviderReady} providerFailed={imageAdProviderFailed} onFilled={markAdFilled} onNoFill={skipAdPlacement}/>
+                        ? <ExoclickImageAd key={`${feedItem.ad.id}-${feedItem.ad.attempt}`} slotId={feedItem.ad.id} request={feedItem.ad.status === "loading" || feedItem.ad.status === "served"} active={isActiveAd} providerReady={imageAdProviderReady} providerFailed={imageAdProviderFailed} onFilled={markAdFilled} onNoFill={skipAdPlacement}/>
                         : <div className="exo-display-frame" aria-hidden="true"><div className="exo-display-skeleton"/></div>}
                     </div>
                   </article>;

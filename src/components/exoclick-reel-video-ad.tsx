@@ -9,6 +9,7 @@ const VIDEO_TAG_URL = "/api/ads/exoclick-vast";
 type ReelImaManager = {
   init: (width: number, height: number, mode: unknown) => void;
   start: () => void;
+  setVolume?: (volume: number) => void;
   destroy: () => void;
   addEventListener: (event: unknown, callback: () => void) => void;
 };
@@ -99,11 +100,19 @@ export function ExoclickReelVideoAd({ slotId, active, fallbackProviderReady, fal
         if (!event?.getAdsManager || session.ended) return;
         const manager = event.getAdsManager();
         session.manager = manager;
-        manager.addEventListener(ima.AdEvent.Type.STARTED, () => { setStarted(true); onFilled(slotId); });
+        manager.addEventListener(ima.AdEvent.Type.STARTED, () => {
+          video.muted = true;
+          manager.setVolume?.(0);
+          setStarted(true);
+          onFilled(slotId);
+          void video.play().catch(() => { /* The muted Reel autoplay path remains available after the first Reel gesture. */ });
+        });
         manager.addEventListener(ima.AdEvent.Type.COMPLETE, () => finish(true));
         manager.addEventListener(ima.AdEvent.Type.ALL_ADS_COMPLETED, () => finish(true));
         manager.addEventListener(ima.AdEvent.Type.CONTENT_RESUME_REQUESTED, () => finish(true));
         manager.init(surface.clientWidth, surface.clientHeight, ima.ViewMode.NORMAL);
+        manager.setVolume?.(0);
+        video.muted = true;
         manager.start();
         void video.play().catch(() => { /* Mobile browsers may require the Reel tap before starting ad media. */ });
       });
@@ -138,7 +147,7 @@ export function ExoclickReelVideoAd({ slotId, active, fallbackProviderReady, fal
 
   if (fallback) return <ExoclickImageAd slotId={slotId} request active={active} providerReady={fallbackProviderReady} providerFailed={fallbackProviderFailed} onFilled={onFilled} onNoFill={onNoFill}/>;
   return <div ref={surfaceRef} className="exo-reel-video-ad-surface" onClick={() => { const video = videoRef.current; if (video) { video.muted = true; void video.play().catch(() => {}); } }}>
-    <video ref={videoRef} className="exo-reel-video-ad-video" muted playsInline aria-label="Advertisement"/>
+    <video ref={videoRef} className="exo-reel-video-ad-video" muted autoPlay playsInline aria-label="Advertisement"/>
     {!started && <span className="reel-image-ad-label">Advertisement</span>}
   </div>;
 }

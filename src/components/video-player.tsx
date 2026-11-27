@@ -23,11 +23,12 @@ function detectNativeAudioAvailability(element: HTMLVideoElement): ReelAudioAvai
   return "unknown";
 }
 
-export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onViewCounted, onPlaybackStarted, onPlaybackStatusChange, onAudioAvailabilityChange, loadingPresentation = "spinner", muted = false, reelAudio = false, controls = true, reelControls = false, preloadOnly = false, warmPreload = true, preloadTargetSeconds = 4, autoPlay, onVideoElement, playerOverlay }: {
+export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, reelViewCount, onViewCounted, onPlaybackStarted, onPlaybackStatusChange, onAudioAvailabilityChange, loadingPresentation = "spinner", muted = false, reelAudio = false, controls = true, reelControls = false, preloadOnly = false, warmPreload = true, preloadTargetSeconds = 4, autoPlay, onVideoElement, playerOverlay }: {
   video: WatchVideo;
   playbackUrl: string;
   playbackType: VideoSourceType;
   sourceHost: string;
+  reelViewCount?: number;
   onViewCounted?: () => void;
   onPlaybackStarted?: (videoId: string) => void;
   onPlaybackStatusChange?: (videoId: string, status: PlaybackStatus) => void;
@@ -552,7 +553,7 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
     {showCustomControls && !failure && <div className="video-bottom-controls" onClick={(event) => event.stopPropagation()}>
       <input className="video-timeline" type="range" min={0} max={mediaDuration > 0 ? mediaDuration : 1} step="0.01" value={Math.min(mediaTime, mediaDuration || 0)} style={{ "--video-progress": `${progressPercent}%` } as CSSProperties} aria-label="Video progress" disabled={mediaDuration <= 0} onChange={(event) => seekMedia(Number(event.currentTarget.value))}/>
        {reelControls
-         ? <div className="reel-control-meta"><strong>{video.title}</strong><PublicViewCount count={video.display_views ?? 0} className="reel-control-views"/></div>
+         ? <div className="reel-control-meta"><strong>{video.title}</strong><PublicViewCount count={reelViewCount ?? video.display_views ?? 0} className="reel-control-views"/></div>
          : <div className="video-control-row">
            <button className="video-control-button video-play-toggle" type="button" aria-label={mediaPlaying ? "Pause video" : "Play video"} onClick={() => void toggleMediaPlayback()}>{mediaPlaying ? <Pause size={25} fill="currentColor"/> : <Play size={25} fill="currentColor"/>}</button>
            <span className="video-time-remaining">-{formatMediaTime(remainingTime)}{mediaDuration > 0 && <span className="video-time-total"> / {formatMediaTime(mediaDuration)}</span>}</span>

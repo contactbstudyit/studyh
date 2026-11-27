@@ -515,7 +515,7 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
     const frame = event.currentTarget.closest<HTMLElement>(".player-frame");
     if (!frame) return;
     const rect = frame.getBoundingClientRect();
-    setTapBurst({ id: Date.now() + Math.random(), action, x: event.clientX - rect.left, y: event.clientY - rect.top });
+    setTapBurst({ id: Date.now() + Math.random(), action, x: rect.width / 2, y: rect.height / 2 });
     if (tapBurstTimerRef.current !== null) window.clearTimeout(tapBurstTimerRef.current);
     tapBurstTimerRef.current = window.setTimeout(() => setTapBurst(null), 620);
   }

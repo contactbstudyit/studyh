@@ -7,6 +7,7 @@ import { recordPublicVideoView } from "@/hooks/use-library";
 import type { VideoRecord } from "@/hooks/use-library";
 import { getPlaybackFailureReason, probeVideoSource, supportsNativeHls } from "@/lib/video-playback";
 import type { SourceProbe, VideoSourceType } from "@/lib/video-playback";
+import PublicViewCount from "@/components/public-view-count";
 
 type WatchVideo = Omit<VideoRecord, "video_url" | "views" | "display_view_count" | "published_at">;
 type PlaybackStatus = "loading" | "ready" | "error";
@@ -550,14 +551,14 @@ export function VideoPlayer({ video, playbackUrl, playbackType, sourceHost, onVi
     {tapBurst && <span key={tapBurst.id} className={`reel-tap-burst burst-${tapBurst.action}`} style={{ left: tapBurst.x, top: tapBurst.y }} aria-hidden="true">{tapBurst.action === "play" ? <Play size={22} fill="currentColor"/> : tapBurst.action === "pause" ? <Pause size={22} fill="currentColor"/> : tapBurst.action === "back" ? <RotateCcw size={22}/> : <RotateCw size={22}/>}</span>}
     {showCustomControls && !failure && <div className="video-bottom-controls" onClick={(event) => event.stopPropagation()}>
       <input className="video-timeline" type="range" min={0} max={mediaDuration > 0 ? mediaDuration : 1} step="0.01" value={Math.min(mediaTime, mediaDuration || 0)} style={{ "--video-progress": `${progressPercent}%` } as CSSProperties} aria-label="Video progress" disabled={mediaDuration <= 0} onChange={(event) => seekMedia(Number(event.currentTarget.value))}/>
-      <div className="video-control-row">
-        <button className="video-control-button video-play-toggle" type="button" aria-label={mediaPlaying ? "Pause video" : "Play video"} onClick={() => void toggleMediaPlayback()}>{mediaPlaying ? <Pause size={25} fill="currentColor"/> : <Play size={25} fill="currentColor"/>}</button>
-        <span className="video-time-remaining">-{formatMediaTime(remainingTime)}{mediaDuration > 0 && <span className="video-time-total"> / {formatMediaTime(mediaDuration)}</span>}</span>
-         <button className="video-control-button video-speed-button" type="button" aria-label={`Playback speed ${mediaPlaybackRate}x`} onClick={cycleMediaPlaybackRate}>{mediaPlaybackRate}x</button>
-         {reelControls
-           ? <button className="video-control-button" type="button" aria-label={mediaMuted || mediaVolume === 0 ? "Unmute video" : "Mute video"} onClick={toggleMediaMute}>{mediaMuted || mediaVolume === 0 ? <VolumeX size={23}/> : <Volume2 size={23}/>}</button>
-           : <button className="video-control-button video-fullscreen-button" type="button" aria-label="Enter fullscreen" onClick={() => void requestMediaFullscreen()}><Maximize size={23}/></button>}
-      </div>
+       {reelControls
+         ? <div className="reel-control-meta"><strong>{video.title}</strong><PublicViewCount count={video.display_views ?? 0} className="reel-control-views"/></div>
+         : <div className="video-control-row">
+           <button className="video-control-button video-play-toggle" type="button" aria-label={mediaPlaying ? "Pause video" : "Play video"} onClick={() => void toggleMediaPlayback()}>{mediaPlaying ? <Pause size={25} fill="currentColor"/> : <Play size={25} fill="currentColor"/>}</button>
+           <span className="video-time-remaining">-{formatMediaTime(remainingTime)}{mediaDuration > 0 && <span className="video-time-total"> / {formatMediaTime(mediaDuration)}</span>}</span>
+           <button className="video-control-button video-speed-button" type="button" aria-label={`Playback speed ${mediaPlaybackRate}x`} onClick={cycleMediaPlaybackRate}>{mediaPlaybackRate}x</button>
+           <button className="video-control-button video-fullscreen-button" type="button" aria-label="Enter fullscreen" onClick={() => void requestMediaFullscreen()}><Maximize size={23}/></button>
+         </div>}
     </div>}
     {loading && !failure && loadingPresentation === "spinner" && <div className="player-loading"><span className="spinner"/><span>Loading video...</span></div>}
     {failure && <div className="player-error"><Film size={24}/><strong>Unable to play this video</strong><button type="button" onClick={() => { setFailure(""); setAttempt((current) => current + 1); }}>Try again</button></div>}
